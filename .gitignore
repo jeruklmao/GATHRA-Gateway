@@ -1,0 +1,10 @@
+.pio/
+.vscode/
+.idea/
+*.bin
+*.elf
+*.map
+*.log
+.env
+secrets/
+test-output/
