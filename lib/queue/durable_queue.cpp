@@ -4,7 +4,10 @@
 
 #include <Arduino.h>
 #include <LittleFS.h>
+#include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 #include "build_config.hpp"
 #include "protocol.hpp"
@@ -15,6 +18,8 @@ namespace {
 constexpr char kQueueDirectory[] = "/queue";
 constexpr char kRecentPath[] = "/queue/recent.bin";
 constexpr char kRecentTempPath[] = "/queue/recent.tmp";
+constexpr char kFilesystemBasePath[] = "/littlefs";
+constexpr char kFilesystemPartitionLabel[] = "littlefs";
 constexpr uint32_t kRecentMagic = 0x47544431U;  // GTD1
 
 class Lock {
@@ -48,11 +53,39 @@ bool readU32(const uint8_t*& cursor, const uint8_t* end, uint32_t& value) {
   return true;
 }
 
+String mountedPath(const char* logicalPath) {
+  return String(kFilesystemBasePath) + logicalPath;
+}
+
+bool silentlyUnlink(const char* logicalPath) {
+  const String path = mountedPath(logicalPath);
+  errno = 0;
+  return ::unlink(path.c_str()) == 0 || errno == ENOENT;
+}
+
+// LittleFS.exists() opens the target and emits an ESP-IDF error for a normal
+// ENOENT result. Queue recovery treats an absent optional file as expected, so
+// use the mounted VFS directly to keep diagnostics reserved for real failures.
+int filePresence(const char* logicalPath) {
+  struct stat info {};
+  const String path = mountedPath(logicalPath);
+  errno = 0;
+  if (::stat(path.c_str(), &info) == 0) return 1;
+  return errno == ENOENT ? 0 : -1;
+}
+
 }  // namespace
 
 bool LittleFsQueueStorage::begin(bool formatOnFailure) {
-  if (!LittleFS.begin(formatOnFailure)) return false;
-  if (!LittleFS.exists(kQueueDirectory) && !LittleFS.mkdir(kQueueDirectory)) return false;
+  if (!LittleFS.begin(formatOnFailure, kFilesystemBasePath, 10,
+                      kFilesystemPartitionLabel)) {
+    return false;
+  }
+  const int directoryPresence = filePresence(kQueueDirectory);
+  if (directoryPresence < 0 ||
+      (directoryPresence == 0 && !LittleFS.mkdir(kQueueDirectory))) {
+    return false;
+  }
   return true;
 }
 
@@ -110,19 +143,18 @@ bool LittleFsQueueStorage::writeRecordAtomic(
            static_cast<unsigned long long>(recordId));
   const String temporary = String(kQueueDirectory) + "/" + baseName + ".tmp";
   const String finalPath = String(kQueueDirectory) + "/" + baseName + ".rec";
-  (void)LittleFS.remove(temporary);
+  if (!silentlyUnlink(temporary.c_str())) return false;
   File file = LittleFS.open(temporary, FILE_WRITE);
   if (!file) return false;
   const bool complete = file.write(bytes.data(), bytes.size()) == bytes.size();
   file.flush();
   file.close();
   if (!complete) {
-    (void)LittleFS.remove(temporary);
+    (void)silentlyUnlink(temporary.c_str());
     return false;
   }
-  if (LittleFS.exists(finalPath)) (void)LittleFS.remove(finalPath);
   if (!LittleFS.rename(temporary, finalPath)) {
-    (void)LittleFS.remove(temporary);
+    (void)silentlyUnlink(temporary.c_str());
     return false;
   }
   return true;
@@ -173,7 +205,7 @@ bool DurableQueue::begin() {
   if (!recentReady) {
     recent_.clear();
     ++stats_.filesystemErrors;
-    if (!LittleFS.remove(kRecentPath) && LittleFS.exists(kRecentPath)) {
+    if (!silentlyUnlink(kRecentPath)) {
       ++stats_.filesystemErrors;
     }
   }
@@ -300,7 +332,9 @@ QueueOperationalStats DurableQueue::operationalStats() const {
 }
 
 bool DurableQueue::loadRecent() {
-  if (!LittleFS.exists(kRecentPath)) return true;
+  const int presence = filePresence(kRecentPath);
+  if (presence == 0) return true;
+  if (presence < 0) return false;
   File file = LittleFS.open(kRecentPath, FILE_READ);
   if (!file || file.size() < 9U || file.size() > 4096U) return false;
   std::vector<uint8_t> bytes(file.size());
@@ -346,14 +380,16 @@ bool DurableQueue::persistRecent() {
     writeU32(bytes, key.sequence);
   }
   writeU32(bytes, QueueRecordCodec::crc32(bytes.data(), bytes.size()));
-  (void)LittleFS.remove(kRecentTempPath);
+  if (!silentlyUnlink(kRecentTempPath)) return false;
   File file = LittleFS.open(kRecentTempPath, FILE_WRITE);
   if (!file) return false;
   const bool complete = file.write(bytes.data(), bytes.size()) == bytes.size();
   file.flush();
   file.close();
-  if (!complete) return false;
-  (void)LittleFS.remove(kRecentPath);
+  if (!complete) {
+    (void)silentlyUnlink(kRecentTempPath);
+    return false;
+  }
   return LittleFS.rename(kRecentTempPath, kRecentPath);
 }
 

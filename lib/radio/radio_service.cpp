@@ -220,8 +220,12 @@ AckTransmission RadioService::transmitAck(const protocol::TelemetryPacket& packe
   }
 #endif
   (void)ulTaskNotifyTake(pdTRUE, 0);
-  radio_.clearPacketReceivedAction();
+  if (dio0Action_ != Dio0Action::kNone) {
+    radio_.clearPacketReceivedAction();
+    dio0Action_ = Dio0Action::kNone;
+  }
   radio_.setPacketSentAction(radioInterrupt);
+  dio0Action_ = Dio0Action::kTransmit;
   report.attempted = true;
   report.startUs = clock_.nowUs();
   diagnostics_.state[0] = '\0';
@@ -291,8 +295,14 @@ bool RadioService::configureUnlocked(const RadioConfig& config) {
 }
 
 bool RadioService::startReceiveUnlocked() {
-  radio_.clearPacketSentAction();
-  radio_.setPacketReceivedAction(radioInterrupt);
+  if (dio0Action_ == Dio0Action::kTransmit) {
+    radio_.clearPacketSentAction();
+    dio0Action_ = Dio0Action::kNone;
+  }
+  if (dio0Action_ == Dio0Action::kNone) {
+    radio_.setPacketReceivedAction(radioInterrupt);
+    dio0Action_ = Dio0Action::kReceive;
+  }
   (void)ulTaskNotifyTake(pdTRUE, 0);
   diagnostics_.lastCode = radio_.startReceive();
   const bool okay = diagnostics_.lastCode == RADIOLIB_ERR_NONE;

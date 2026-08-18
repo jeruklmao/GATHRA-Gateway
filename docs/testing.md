@@ -32,6 +32,23 @@ pio run -e hil --target upload --upload-port /dev/ttyACM0
 timeout 30s pio device monitor --port /dev/ttyACM0 --baud 115200
 ```
 
+The 2026-08-18 bench board enumerated as native ESP USB Serial/JTAG. Its
+PlatformIO/esptool flasher stub disconnected, while the ROM loader was reliable
+with the following diagnostic form:
+
+```bash
+~/.platformio/penv/bin/python \
+  ~/.platformio/packages/tool-esptoolpy/esptool.py \
+  --chip esp32c3 --port /dev/ttyACM0 --baud 115200 \
+  --before default_reset --after watchdog_reset --no-stub \
+  write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB \
+  0x10000 .pio/build/hil/firmware.bin
+```
+
+Use that board-specific fallback only after the normal PlatformIO upload fails.
+The watchdog reset matters on this native USB target because the ordinary core
+reset can leave it in ROM download mode.
+
 Expected boot evidence includes version/build/Git metadata, 4 MiB flash,
 LittleFS recovery and derived record capacity, SX1278 initialization with the
 documented defaults, continuous `RECEIVING`, fallback AP, WebServer startup,
@@ -63,24 +80,23 @@ persisted settings, and continuous RX restart.
 
 ## Wi-Fi adapter isolation
 
-On the development host used for this project, identify interfaces by USB ID
-and driver before connecting. The Realtek RTL8188EUS (`0bda:8179`, `rtl8xxxu`)
-is the permitted Gateway-AP client. Do not disconnect, reconfigure, or route
-through the Intel `iwlwifi` adapter.
-
-Example after resolving the Realtek interface name:
+Identify interfaces and confirm which adapter the operator has assigned before
+changing any NetworkManager state. Bind every scan, connection, and HTTP probe
+to that exact interface; do not rely on the default route. For example:
 
 ```bash
-nmcli device wifi list ifname wlp0s20f0u1
+nmcli device wifi list ifname <test-interface>
 nmcli device wifi connect GATHRA-GW-XXXXXX \
-  password sman35jakarta ifname wlp0s20f0u1
-curl --interface wlp0s20f0u1 http://192.168.4.1/api/status
+  password sman35jakarta ifname <test-interface>
+curl --interface <test-interface> http://192.168.4.1/api/status
 ```
 
-An isolated Backend can be published on the host's Realtek AP-side address
+An isolated Backend can be published on the selected host AP-side address
 (normally `192.168.4.2`) and configured as `http://192.168.4.2:3000`. This
-development-only topology can drain the queue without moving the Intel
-adapter or provisioning an external WLAN.
+development-only topology can drain the queue without provisioning an external
+WLAN. During the recorded session, the RTL8188EUS was reserved for internet and
+left unchanged; the Intel adapter alone was used for Gateway AP and temporary
+STA-hotspot testing.
 
 ## Truthful result policy
 

@@ -83,6 +83,8 @@ class RadioService final : public AckSink {
   RadioDiagnostics diagnostics_{};
   uint32_t gatewayBootSessionId_ = 0;
   bool spiStarted_ = false;
+  enum class Dio0Action : uint8_t { kNone, kReceive, kTransmit };
+  Dio0Action dio0Action_ = Dio0Action::kNone;
 #ifdef GATHRA_HIL_SYNTHETIC
   bool suppressNextAck_ = false;
 #endif

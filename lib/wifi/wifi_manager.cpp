@@ -33,6 +33,10 @@ bool WifiManager::begin(const GatewayConfig& config, const char* hardwareMacComp
            hardwareMacCompact == nullptr ? "UNKNOWN" : hardwareMacCompact + 6);
   applyConfig(config);
   WiFi.persistent(false);
+  // Gateway owns reconnect timing. The Arduino driver's automatic loop can
+  // otherwise retry every few seconds, contending with fallback-AP dashboard
+  // traffic and continuing even after credentials are cleared.
+  WiFi.setAutoReconnect(false);
   WiFi.setSleep(false);
   WiFi.setHostname(build::kMdnsHost);
   disconnectedSinceMs_ = millis();
@@ -178,6 +182,10 @@ void WifiManager::stopFallbackAp() {
 void WifiManager::beginSta(const char* ssid, const char* password) {
   lastReconnectMs_ = millis();
   if (ssid == nullptr || ssid[0] == '\0') {
+    // Explicitly cancel any connection attempt that was started with the old
+    // credentials. Updating the in-memory/NVS values alone does not stop the
+    // ESP Wi-Fi state machine.
+    WiFi.disconnect(false, false);
     {
       Lock lock(mutex_);
       if (lock) reconnecting_ = false;

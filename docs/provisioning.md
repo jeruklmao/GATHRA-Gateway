@@ -26,6 +26,8 @@ Default policy:
 - STA reconnect attempt every 15 seconds.
 - fallback AP after 60 seconds without a stable STA connection;
 - AP shutdown 30 seconds after STA becomes stable;
+- clearing credentials cancels an in-progress driver connection immediately
+  and leaves the fallback AP available;
 - AP returns after a later extended disconnect.
 
 The dashboard remains available on the STA LAN address. Best-effort mDNS is
