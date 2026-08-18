@@ -61,7 +61,13 @@ The target is fixed at 4 MiB flash. `partitions.csv` defines two 1,408 KiB OTA
 slots, a 1,152 KiB LittleFS spool, NVS, OTA metadata, and a 64 KiB coredump
 partition. The queue derives its runtime capacity from the mounted filesystem;
 with the full partition and maximum-size framed records, the conservative
-build-time estimate is 3,182 records. See
+build-time estimate is 3,182 records.
+
+The clean production build recorded on 2026-08-18 uses 1,160,888 of the
+1,441,792 program bytes reported by PlatformIO (80.5%), uses 67,116 of 327,680
+RAM bytes (20.5%), and produces a 1,217,440-byte flashable `firmware.bin`.
+These are build-target measurements; physical flash probing is tracked
+separately. See
 [docs/durable-queue.md](docs/durable-queue.md) for the calculation.
 
 ## Documentation
@@ -76,4 +82,5 @@ build-time estimate is 3,182 records. See
 - [Dashboard](docs/dashboard.md)
 - [OTA and rollback](docs/ota.md)
 - [Testing and HIL](docs/testing.md)
+- [Development-session validation results](docs/validation-results.md)
 - [Pending real-Node RF procedure](docs/pending-node-rf-validation.md)
