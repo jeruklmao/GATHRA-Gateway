@@ -6,6 +6,8 @@
 #include <Update.h>
 #include <esp_timer.h>
 #include <math.h>
+#include <memory>
+#include <new>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -365,8 +367,18 @@ void Dashboard::handleStatus() {
 }
 
 void Dashboard::handleLogs() {
-  LogEntry entries[build::kLogCapacity]{};
-  const size_t count = gLogger.snapshot(entries, build::kLogCapacity);
+  // The bounded log ring is about 20 KiB.  WebServer handlers execute on the
+  // Arduino loop task, whose stack is much smaller, so the snapshot must live
+  // on the heap.  Keeping it on the stack corrupts adjacent RAM before the
+  // first mutex acquisition when the dashboard polls this endpoint.
+  std::unique_ptr<LogEntry[]> entries(
+      new (std::nothrow) LogEntry[build::kLogCapacity]{});
+  if (!entries) {
+    GTH_LOGE("WEB", "log snapshot allocation failed");
+    sendText(503, "log snapshot unavailable");
+    return;
+  }
+  const size_t count = gLogger.snapshot(entries.get(), build::kLogCapacity);
   JsonDocument document;
   JsonArray array = document["entries"].to<JsonArray>();
   for (size_t index = 0; index < count; ++index) {

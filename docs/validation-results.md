@@ -46,7 +46,8 @@ reset was not sufficient to leave download mode; the watchdog reset was.
 | Queue reboot recovery | PASS | Two pending records recovered after software reboot, then drained exactly once |
 | Browser-compatible OTA | PASS | Multipart upload booted inactive slot as `PENDING_VERIFY`, passed internal checks, and became `VALID` |
 | Bootloader rollback | PASS | Controlled image booted `ota_0` pending, restarted before validation, and bootloader returned to valid `ota_1` |
-| NTP synchronization | BLOCKED | Temporary host hotspot provided LAN service but its cross-zone internet forwarding remained unavailable; no trusted NTP timestamp was claimed |
+| NTP synchronization | PASS | On the internet-connected LAN, serial logged `UTC clock synchronized unixMs=1787052690563`; `/api/status` reported `SYNCED`, `2026-08-18T11:32:15.517Z`, and a 275 ms absolute delta from the host UTC clock |
+| Dashboard polling stability | PASS | A discovered `/api/logs` loop-task stack overflow was fixed by heap-allocating the bounded snapshot; 30 consecutive `/api/status` + `/api/logs` cycles completed with no panic or reset and 156,796 free heap bytes afterward |
 
 Representative synthetic-path timing for sequence 3003 was:
 

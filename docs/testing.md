@@ -54,6 +54,22 @@ LittleFS recovery and derived record capacity, SX1278 initialization with the
 documented defaults, continuous `RECEIVING`, fallback AP, WebServer startup,
 and OTA partition validation.
 
+## NTP and dashboard polling
+
+After provisioning the Gateway onto an internet-connected LAN, verify trusted
+time through the API and repeatedly exercise both dashboard polling endpoints:
+
+```bash
+curl --fail http://<gateway-ip>/api/status | jq '.time'
+curl --fail http://<gateway-ip>/api/logs | jq '.entries | length'
+```
+
+Serial must report `UTC clock synchronized`, the status state must be `SYNCED`,
+and `currentUtc` must advance in UTC without a reboot. The 2026-08-18 HIL run
+completed 30 consecutive status-plus-log polling cycles after synchronization;
+the clock was within 275 ms of the host UTC clock and the Gateway retained
+156,796 free heap bytes.
+
 ## Synthetic post-RX path
 
 Only the `hil` image accepts these serial commands:
