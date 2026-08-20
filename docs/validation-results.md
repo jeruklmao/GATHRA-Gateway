@@ -41,6 +41,7 @@ reset was not sufficient to leave download mode; the watchdog reset was.
 | Extended STA loss fallback | PASS | AP returned after the configured 60-second disconnected interval |
 | Runtime credential clearing | PASS | Explicit clear canceled the old ESP driver connection attempt; fallback-AP OTA returned to normal speed |
 | Dashboard controls | PASS | Status, logs, Wi-Fi, Gateway ID, pairing, radio validation/restart, queue flush, Backend test/config, OTA, and confirmed reboot exercised |
+| Dashboard unsaved-form preservation | PASS | On 2026-08-20, the browser regression check failed on the previous image (SSID reverted after one poll), then passed on the physical Gateway after the fix; visible SSID and prospective `FormData` both retained the edit without submitting it |
 | Backend upload | PASS | Queue drained through both fallback-AP local HTTP and STA local HTTP into real PostgreSQL |
 | Authentication failure retention | PASS | Three HTTP 401 retries retained the queued record; restoring the token drained that same record |
 | Queue reboot recovery | PASS | Two pending records recovered after software reboot, then drained exactly once |

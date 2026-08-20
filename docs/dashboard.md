@@ -33,6 +33,13 @@ Status APIs never return the Wi-Fi password or Bearer token. Logs do not print
 either value. The dashboard has no application-level authentication in v1;
 this is a known limitation, not an accidental omission.
 
+The five-second status refresh continues while an operator edits settings, but
+it never repopulates a form after that form receives unsaved input. This keeps
+an edited SSID from reverting when focus moves to the password field and also
+protects multi-field radio and Backend edits. A failed save leaves the entered
+values intact. A successful save clears the form's dirty state and removes
+password values from the browser DOM.
+
 The WebServer executes below the radio worker. A slow client can delay another
 dashboard request but cannot make the radio worker wait for HTTP, DNS, or HTML
 rendering. OTA flash activity is the explicit exception and is shown as

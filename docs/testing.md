@@ -70,6 +70,19 @@ completed 30 consecutive status-plus-log polling cycles after synchronization;
 the clock was within 275 ms of the host UTC clock and the Gateway retained
 156,796 free heap bytes.
 
+To regression-test dashboard form preservation against a running Gateway, use
+Node.js 22+ and Chrome/Chromium:
+
+```bash
+node tools/test_dashboard_forms.mjs http://<gateway-ip>/
+```
+
+The check edits the SSID, moves focus to the password, waits beyond the
+five-second status refresh, and verifies both the visible field and prospective
+`FormData`. It deliberately does not submit the form or change Gateway
+configuration. Set `GATHRA_CHROME` if Chrome is not installed in a standard
+path.
+
 ## Synthetic post-RX path
 
 Only the `hil` image accepts these serial commands:
