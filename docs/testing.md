@@ -1,135 +1,40 @@
-# Testing and HIL
+# Gateway testing
 
-## Automated host tests
+## Automated
 
-```bash
+~~~bash
 pio test -e native
-```
-
-The suite uses the exact golden telemetry and ACK vectors from
-`GATHRA-Node/test/test_main.cpp`. It covers Protocol v1 framing and endian
-values, Node ID bounds, sentinel interpretation, ACK matching, explicit
-pairing and paired-node enforcement, exact-tuple dedup, durable queue codec,
-recovery/corruption/overflow, durable-before-ACK order, duplicate re-ACK,
-configuration validation, batch JSON structure, per-reading boot identity,
-terminal statuses, partial responses, and HTTP retry policy.
-
-Production and diagnostic profiles:
-
-```bash
 pio run -e esp32-c3-devkitm-1
-pio run -e hil
-pio run -e rollback-test
-```
+~~~
 
-## USB and serial
+Native tests cover Protocol 2 TELEMETRY/ACK_COMMAND/COMMAND_RESULT golden bytes, big-endian fields, wrong versions and malformed lengths, NONE and all required commands, timeValid true/false, every result code, pairing/session deduplication, durable-before-ACK behavior, command allocator persistence, pending/restart/resend, exact result matching, wrong ID ignore, duplicate result, confirmed-not-resent, queue recovery, and existing configuration/queue logic.
 
-Rediscover the board every time; do not assume a stable device path.
+## USB/RF HIL evidence (2026-08-25)
 
-```bash
-pio device list
-pio run -e hil --target upload --upload-port /dev/ttyACM0
-timeout 30s pio device monitor --port /dev/ttyACM0 --baud 115200
-```
+Gateway USB identity was positively mapped to MAC 10:00:3B:D4:E9:58. Firmware 2.0.0 initialized SX1278, recovered LittleFS and NVS command state, joined configured Wi-Fi at 192.168.100.34, and synchronized NTP.
 
-The 2026-08-18 bench board enumerated as native ESP USB Serial/JTAG. Its
-PlatformIO/esptool flasher stub disconnected, while the ROM loader was reliable
-with the following diagnostic form:
+A Node v2 pairing candidate was observed at RSSI -45 dBm, SNR 10.5 dB and frequency error about +1274 Hz. After pairing, real packets were durably enqueued before ACK. Representative timing was queue write 14.273 ms, RX-to-durable 15.900 ms, RX-to-ACK-start 16.089 ms, and RX-to-ACK-complete 626.828 ms; later flash writes produced bounded ACK starts up to 74.735 ms. Node ACK reception was first-attempt success.
 
-```bash
-~/.platformio/penv/bin/python \
-  ~/.platformio/packages/tool-esptoolpy/esptool.py \
-  --chip esp32c3 --port /dev/ttyACM0 --baud 115200 \
-  --before default_reset --after watchdog_reset --no-stub \
-  write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB \
-  0x10000 .pio/build/hil/firmware.bin
-```
+SET_POLL_INTERVAL_MINUTES=5 returned APPLIED and CONFIRMED. A SCHEDULE_MAINTENANCE_AT command remained PENDING through a Gateway software reboot, was restored with nextCommandId=3, resent, and confirmed. ENTER_MAINTENANCE_NOW also confirmed. The Node reported Gateway UTC and corrected an INVALID_VL RTC.
 
-Use that board-specific fallback only after the normal PlatformIO upload fails.
-The watchdog reset matters on this native USB target because the ordinary core
-reset can leave it in ROM download mode.
+For an intentional result-loss test, command 5 set the interval to 2 minutes.
+The Gateway was moved to 450 MHz only during COMMAND_RESULT reception, so its
+state remained SENT after Node persistence/application. On the next telemetry
+the same ID was resent (`sendCount=2`); the Node did not repeat the side effect,
+re-sent its stored APPLIED result, and Gateway changed to CONFIRMED. Command 10
+later restored the production interval to 10 minutes.
 
-Expected boot evidence includes version/build/Git metadata, 4 MiB flash,
-LittleFS recovery and derived record capacity, SX1278 initialization with the
-documented defaults, continuous `RECEIVING`, fallback AP, WebServer startup,
-and OTA partition validation.
+Battery-only RF testing observed repeated `RTC_TIMER` hard-power boots, manual
+and command maintenance, two normal TF polls while an alarm remained pending,
+the exact minute-aligned AF wake, one-shot completion, and two successful Node
+OTA latch-preserving reboots. Representative battery-run RF was RSSI -39 to
+-42 dBm, SNR 13.2 to 14.25 dB, frequency error about +1.2 kHz, with ACK start
+19.383 to 76.279 ms and ACK completion 629.949 to 687.058 ms after RX.
 
-## NTP and dashboard polling
+Browser OTA uploaded 1233024 bytes, booted ota_1 PENDING_VERIFY, restored pairing/command state, and marked the image valid after checks.
 
-After provisioning the Gateway onto an internet-connected LAN, verify trusted
-time through the API and repeatedly exercise both dashboard polling endpoints:
+The currently deployed Backend still returned a v1-only permanent rejection during this bench run. The repository's minimal v2 decoder/migration tests pass, but deployment is a separate operational action.
 
-```bash
-curl --fail http://<gateway-ip>/api/status | jq '.time'
-curl --fail http://<gateway-ip>/api/logs | jq '.entries | length'
-```
+## Network safety
 
-Serial must report `UTC clock synchronized`, the status state must be `SYNCED`,
-and `currentUtc` must advance in UTC without a reboot. The 2026-08-18 HIL run
-completed 30 consecutive status-plus-log polling cycles after synchronization;
-the clock was within 275 ms of the host UTC clock and the Gateway retained
-156,796 free heap bytes.
-
-To regression-test dashboard form preservation against a running Gateway, use
-Node.js 22+ and Chrome/Chromium:
-
-```bash
-node tools/test_dashboard_forms.mjs http://<gateway-ip>/
-```
-
-The check edits the SSID, moves focus to the password, waits beyond the
-five-second status refresh, and verifies both the visible field and prospective
-`FormData`. It deliberately does not submit the form or change Gateway
-configuration. Set `GATHRA_CHROME` if Chrome is not installed in a standard
-path.
-
-## Synthetic post-RX path
-
-Only the `hil` image accepts these serial commands:
-
-```text
-HIL_PAIR
-HIL_INJECT 1001
-HIL_INJECT 1001
-HIL_SUPPRESS_ACK_ONCE
-HIL_INJECT 1002
-HIL_RADIO_CYCLE
-HIL_UNPAIR
-```
-
-`HIL_INJECT` enters at the point immediately after successful physical packet
-read and uses the canonical Node packet. It exercises production decode,
-pairing, dedup, LittleFS append, ACK encoding/real SX1278 transmit, immediate RX
-restart, queue serialization, and—when configured—Backend delivery. The repeat
-of sequence 1001 must re-ACK without increasing queue depth. Suppression is a
-diagnostic only; it never exists in production.
-
-`HIL_RADIO_CYCLE` exercises SX1278 standby, sleep, reinitialization with the
-persisted settings, and continuous RX restart.
-
-## Wi-Fi adapter isolation
-
-Identify interfaces and confirm which adapter the operator has assigned before
-changing any NetworkManager state. Bind every scan, connection, and HTTP probe
-to that exact interface; do not rely on the default route. For example:
-
-```bash
-nmcli device wifi list ifname <test-interface>
-nmcli device wifi connect GATHRA-GW-XXXXXX \
-  password sman35jakarta ifname <test-interface>
-curl --interface <test-interface> http://192.168.4.1/api/status
-```
-
-An isolated Backend can be published on the selected host AP-side address
-(normally `192.168.4.2`) and configured as `http://192.168.4.2:3000`. This
-development-only topology can drain the queue without provisioning an external
-WLAN. During the recorded session, the RTL8188EUS was reserved for internet and
-left unchanged; the Intel adapter alone was used for Gateway AP and temporary
-STA-hotspot testing.
-
-## Truthful result policy
-
-Record only observed evidence. With the production Node deployed elsewhere,
-real Node RX, Node-side ACK success/retry, RF latency, and real RSSI/SNR remain
-`NOT TESTED — Node deployed in field`; follow
-[pending-node-rf-validation.md](pending-node-rf-validation.md) later.
+The test laptop mapping was RTL8188 wlp0s20f0u1 for Internet and Intel AX211 wlp0s20f3 for local GATHRA AP access. Only AX211 was connected to the Node AP; the RTL connection and default Internet route were not modified. Remove the temporary AX211 NetworkManager profile after battery HIL.

@@ -31,7 +31,7 @@ void PairingManager::observe(const protocol::TelemetryPacket& packet,
   candidate_ = {};
   candidate_.available = true;
   strncpy(candidate_.nodeId, packet.nodeId, sizeof(candidate_.nodeId) - 1U);
-  candidate_.bootSessionId = packet.bootSessionId;
+  candidate_.persistentSessionId = packet.persistentSessionId;
   candidate_.sequence = packet.sequence;
   candidate_.rssiDbm = rssiDbm;
   candidate_.snrDb = snrDb;

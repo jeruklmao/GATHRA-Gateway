@@ -1,81 +1,31 @@
-# Architecture
+# Gateway architecture
 
-## Runtime model
+Firmware 2.0.0 separates the latency-critical LoRa path from network work.
 
-ESP32-C3 is single-core, so priorities and bounded work matter more than the
-number of tasks. The radio worker runs at FreeRTOS priority 4. Wi-Fi, SNTP, and
-backend workers run at priority 1; the Arduino loop serves the dashboard.
-FreeRTOS mutex priority inheritance bounds contention around the small queue
-and radio critical sections.
+## Radio path
 
-```text
-                         DIO0 ISR
-                            |
-                    direct task notify
-                            v
-                  radio worker (priority 4)
-       decode -> pairing -> dedup -> durable append -> ACK
-                                                    -> RX restart
-                            |
-                            v
-                      LittleFS queue
-                            |
-                backend worker (priority 1)
-             Wi-Fi + trusted time + Bearer token
-                            |
-                   HTTPS JSON batches
+A priority-4 receive worker owns SX1278 receive/transmit state. For TELEMETRY it performs exact Protocol 2 decoding, pairing validation, persistent-session sequence deduplication, and atomic LittleFS enqueue before calling the ACK transmitter. ACK_COMMAND is constructed with a current trusted-time snapshot and a copy of the persisted pending command. RX is restored immediately after transmission.
 
-  Wi-Fi worker --- STA reconnect and fallback AP
-  SNTP worker ---- explicit trusted/untrusted UTC state
-  Arduino loop --- local WebServer, dashboard, configuration, OTA
-```
+The Backend worker and NTP are never awaited. If time is untrusted, flags.timeValid=0 and gatewayUnixTime=0 while ACK reliability continues.
 
-The ISR does not access SPI, parse packets, write flash, or log. It only wakes
-the high-priority worker. DNS, NTP, HTTP, dashboard rendering, and backend
-backoff never occur in the radio task.
+COMMAND_RESULT is validated separately. It must match the paired Node, latest persistent session, current command ID and command type. A matching result atomically changes command state to CONFIRMED; wrong and stale results are ignored. It is not acknowledged.
 
-## Receive and ACK invariant
+## Command state
 
-For a new packet from the paired Node, the production order is:
+CommandStore contains a persistent uint32 nextCommandId and one bounded command record. Creation increments and saves the allocator together with PENDING state, preventing ID reuse after reboot. SENT records remain eligible for every later ACK. A Gateway reboot restores PENDING/SENT and retransmits; CONFIRMED is not retransmitted. Access from the radio and dashboard tasks is serialized with a mutex.
 
-1. RadioLib reports a completed receive and validates SX1278 packet CRC.
-2. The Gateway independently decodes exact Protocol v1 framing.
-3. The configured paired Node ID is checked.
-4. The exact `(nodeId, bootSessionId, sequence)` identity is checked against
-   queued and recently uploaded records.
-5. A checksummed record is written to a temporary LittleFS file, flushed,
-   closed, and atomically renamed to its committed name.
-6. Only after that succeeds is the matching ACK transmitted.
-7. ACK completion is finalized and continuous receive mode is restored before
-   logging or any backend work.
+States are NONE, PENDING, SENT, CONFIRMED, FAILED and CANCELLED. Only matching COMMAND_RESULT makes CONFIRMED.
 
-If step 5 fails, the Gateway does not ACK. A duplicate is not appended again,
-but it is ACKed again. Unknown and unconfirmed pairing candidates are neither
-queued nor ACKed.
+## Durable telemetry
 
-Diagnostics record queue-write duration, RX-to-durable-completion,
-RX-to-ACK-start, and RX-to-ACK-complete latency in microseconds. The Node
-timeout is 1,800 ms; normal operation is designed to remain far below it.
+Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 2 telemetry before indexing. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
 
-## Concurrency and failure isolation
+The live telemetry view and current known poll interval only use the explicitly paired production Node.
 
-Queue startup recovery completes before radio receive starts. Runtime `peek`
-and terminal dequeue operations are limited to the configured maximum batch of
-50 small files, rather than an unbounded scan. Startup is the only full spool
-scan. There is no compaction in the receive path.
+## Time
 
-Lack of Wi-Fi, DNS, token, SNTP, or Backend does not prevent local receive,
-durable append, or ACK. HTTPS uploads wait for trusted time; explicitly
-configured local `http://` endpoints can be used without SNTP during HIL.
+SNTP maintains UTC trust. Every ACK asks TimeService for a new snapshot close to packet generation. The dashboard reports UNSYNCHRONIZED/SYNCED state and exact last/current sync. Scheduled commands require trusted NTP and a minute-aligned UTC target 60 seconds to 27 days ahead.
 
-OTA necessarily interrupts capture during flash writes and reboot. The
-dashboard and log state say `OTA IN PROGRESS`; no capture guarantee is made in
-that window.
+## OTA and watchdog boundaries
 
-## Configuration and identity
-
-One versioned configuration blob is validated before NVS persistence. Radio
-changes are tested against the SX1278 first and rolled back in RAM if
-initialization or RX restart fails; NVS is updated only after successful apply.
-The immutable hardware MAC and editable logical Gateway ID are separate.
-Default logical IDs are `GTH-GW-<12 uppercase MAC hex digits>`.
+OTA writes the inactive application slot, boots PENDING_VERIFY, and marks valid only after internal configuration/filesystem/radio/Wi-Fi service checks. The dashboard warns that telemetry capture is unavailable during OTA/reboot.

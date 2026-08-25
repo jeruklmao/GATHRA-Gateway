@@ -38,7 +38,7 @@ bool DurableQueueCore::recover() {
       continue;
     }
     const TelemetryKey key = makeTelemetryKey(
-        telemetry.nodeId, telemetry.bootSessionId, telemetry.sequence);
+        telemetry.nodeId, telemetry.persistentSessionId, telemetry.sequence);
     entries_.push_back({record.recordId, keyHash(key)});
     if (record.recordId >= nextRecordId_) nextRecordId_ = record.recordId + 1U;
   }
@@ -101,7 +101,7 @@ bool DurableQueueCore::enqueue(QueueRecord& record) {
     ++stats_.droppedOldest;
   }
   const TelemetryKey key = makeTelemetryKey(
-      telemetry.nodeId, telemetry.bootSessionId, telemetry.sequence);
+      telemetry.nodeId, telemetry.persistentSessionId, telemetry.sequence);
   entries_.push_back({record.recordId, keyHash(key)});
   ++nextRecordId_;
   return true;
@@ -154,7 +154,7 @@ bool DurableQueueCore::contains(const TelemetryKey& key) {
       continue;
     }
     const TelemetryKey stored = makeTelemetryKey(
-        telemetry.nodeId, telemetry.bootSessionId, telemetry.sequence);
+        telemetry.nodeId, telemetry.persistentSessionId, telemetry.sequence);
     if (telemetryKeyEqual(stored, key)) return true;
   }
   return false;
@@ -181,7 +181,7 @@ uint64_t DurableQueueCore::keyHash(const TelemetryKey& key) {
     mix(static_cast<uint8_t>(key.nodeId[index]));
   }
   for (int shift = 24; shift >= 0; shift -= 8) {
-    mix(static_cast<uint8_t>(key.bootSessionId >> shift));
+    mix(static_cast<uint8_t>(key.persistentSessionId >> shift));
   }
   for (int shift = 24; shift >= 0; shift -= 8) {
     mix(static_cast<uint8_t>(key.sequence >> shift));

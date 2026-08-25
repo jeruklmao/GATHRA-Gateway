@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "gateway_config.hpp"
+#include "command_store.hpp"
 #include "packet_processor.hpp"
 #include "time_manager.hpp"
 
@@ -34,7 +35,7 @@ class RadioService final : public AckSink {
  public:
   RadioService();
   bool begin(const RadioConfig& config, PairingManager& pairing,
-             PacketQueueSink& queue, TimeManager& time,
+             PacketQueueSink& queue, TimeManager& time, CommandStore& commands,
              uint32_t gatewayBootSessionId);
   bool applyConfig(const RadioConfig& candidate);
   bool restart();
@@ -78,6 +79,7 @@ class RadioService final : public AckSink {
   QueueHandle_t syntheticQueue_ = nullptr;
   PairingManager* pairing_ = nullptr;
   TimeManager* time_ = nullptr;
+  CommandStore* commands_ = nullptr;
   std::unique_ptr<PacketProcessor> processor_;
   SystemMonotonicClock clock_{};
   RadioDiagnostics diagnostics_{};

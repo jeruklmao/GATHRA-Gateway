@@ -186,7 +186,7 @@ bool BackendWorker::uploadOnce(bool& completeSuccess) {
     }
     QueueTerminalAction action{};
     action.recordId = record.recordId;
-    action.key = makeTelemetryKey(telemetry.nodeId, telemetry.bootSessionId,
+    action.key = makeTelemetryKey(telemetry.nodeId, telemetry.persistentSessionId,
                                   telemetry.sequence);
     action.permanentlyRejected =
         result.status == BackendRecordStatus::kRejectedInvalid;
@@ -194,7 +194,7 @@ bool BackendWorker::uploadOnce(bool& completeSuccess) {
     if (action.permanentlyRejected) {
       GTH_LOGE("BACKEND", "permanent rejection node=%s boot=%lu seq=%lu reason=%s",
                telemetry.nodeId,
-               static_cast<unsigned long>(telemetry.bootSessionId),
+               static_cast<unsigned long>(telemetry.persistentSessionId),
                static_cast<unsigned long>(telemetry.sequence),
                result.reason[0] == '\0' ? "unspecified" : result.reason);
     }

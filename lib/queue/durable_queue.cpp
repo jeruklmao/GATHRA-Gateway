@@ -376,7 +376,7 @@ bool DurableQueue::persistRecent() {
     const size_t length = strnlen(key.nodeId, sizeof(key.nodeId));
     bytes.push_back(static_cast<uint8_t>(length));
     bytes.insert(bytes.end(), key.nodeId, key.nodeId + length);
-    writeU32(bytes, key.bootSessionId);
+    writeU32(bytes, key.persistentSessionId);
     writeU32(bytes, key.sequence);
   }
   writeU32(bytes, QueueRecordCodec::crc32(bytes.data(), bytes.size()));

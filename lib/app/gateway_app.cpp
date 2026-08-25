@@ -8,6 +8,7 @@
 
 #include "firmware_version.hpp"
 #include "logger.hpp"
+#include "protocol.hpp"
 
 namespace gathra::gateway {
 
@@ -22,9 +23,9 @@ void GatewayApp::begin() {
   strncpy(identity_.firmwareVersion, firmware::kVersion,
           sizeof(identity_.firmwareVersion) - 1U);
 
-  GTH_LOGI("APP", "GATHRA Gateway v%s build=%s git=%s built=%s",
-           firmware::kVersion, firmware::kBuildFlavor, firmware::kGitCommit,
-           firmware::kBuildDate);
+  GTH_LOGI("APP", "GATHRA Gateway firmware=%s protocol=%u build=%s git=%s built=%s",
+           firmware::kVersion, protocol::kVersion, firmware::kBuildFlavor,
+           firmware::kGitCommit, firmware::kBuildDate);
   GTH_LOGI("APP", "hardwareMac=%s bootSessionId=%lu reset=%s",
            hardwareMac_, static_cast<unsigned long>(identity_.bootSessionId),
            resetReasonName());
@@ -54,20 +55,30 @@ void GatewayApp::begin() {
   }
 
   pairing_.begin(config.pairedNodeId);
+  bool commandStateFresh = false;
+  const bool commandReady = commands_.begin(commandBackend_, commandStateFresh);
+  if (!commandReady) {
+    GTH_LOGE("COMMAND", "persistent command state initialization failed");
+  } else {
+    GTH_LOGI("COMMAND", "%s nextId=%lu state=%s",
+             commandStateFresh ? "initialized" : "restored",
+             static_cast<unsigned long>(commands_.nextCommandId()),
+             commandStateName(commands_.current().state));
+  }
   const bool timeReady = time_.begin();
   const bool radioReady = radio_.begin(config.radio, pairing_, queue_, time_,
-                                       identity_.bootSessionId);
+                                       commands_, identity_.bootSessionId);
   if (!radioReady) GTH_LOGE("RADIO", "radio unavailable; dashboard recovery remains active");
   const bool wifiReady = wifi_.begin(config, hardwareMacCompact_);
   if (!wifiReady) GTH_LOGE("WIFI", "Wi-Fi manager initialization failed");
   const bool backendReady = backend_.begin(queue_, time_, config, identity_);
   if (!backendReady) GTH_LOGE("BACKEND", "backend worker initialization failed");
   const bool dashboardReady = dashboard_.begin(
-      configStore_, radio_, queue_, wifi_, backend_, time_, ota_, identity_,
+      configStore_, radio_, queue_, wifi_, backend_, time_, commands_, ota_, identity_,
       resetReasonName());
   if (!dashboardReady) GTH_LOGE("WEB", "dashboard initialization failed");
 
-  const bool internalStateSane = configReady && queueReady && timeReady &&
+  const bool internalStateSane = configReady && queueReady && timeReady && commandReady &&
                                  configStore_.healthy();
   (void)ota_.completeBootValidation(configReady, queueReady,
                                     internalStateSane);

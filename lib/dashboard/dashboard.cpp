@@ -81,7 +81,8 @@ bool formatUtc(int64_t unixMs, char* output, size_t capacity) {
 bool Dashboard::begin(ConfigStore& configStore, RadioService& radio,
                       DurableQueue& queue, WifiManager& wifi,
                       BackendWorker& backend, TimeManager& time,
-                      OtaManager& ota, const GatewayIdentity& identity,
+                      CommandStore& commands, OtaManager& ota,
+                      const GatewayIdentity& identity,
                       const char* resetReason) {
   configStore_ = &configStore;
   radio_ = &radio;
@@ -89,6 +90,7 @@ bool Dashboard::begin(ConfigStore& configStore, RadioService& radio,
   wifi_ = &wifi;
   backend_ = &backend;
   time_ = &time;
+  commands_ = &commands;
   ota_ = &ota;
   identity_ = identity;
   strncpy(resetReason_, resetReason == nullptr ? "unknown" : resetReason,
@@ -138,6 +140,14 @@ void Dashboard::registerRoutes() {
     sendText(200, "backend worker awakened; queue records are retained until terminal results");
   });
   server_.on("/api/backend/test", HTTP_POST, [this]() { handleBackendTest(); });
+  server_.on("/api/command/maintenance-now", HTTP_POST,
+             [this]() { handleEnterMaintenance(); });
+  server_.on("/api/command/poll-interval", HTTP_POST,
+             [this]() { handlePollIntervalCommand(); });
+  server_.on("/api/command/schedule", HTTP_POST,
+             [this]() { handleScheduleMaintenance(); });
+  server_.on("/api/command/cancel", HTTP_POST,
+             [this]() { handleCancelCommand(); });
   server_.on("/api/reboot", HTTP_POST, [this]() {
     if (server_.arg("confirm") != "REBOOT") {
       sendText(422, "confirmation must equal REBOOT");
@@ -167,6 +177,7 @@ void Dashboard::handleStatus() {
   JsonDocument document;
   JsonObject gateway = document["gateway"].to<JsonObject>();
   gateway["firmwareVersion"] = firmware::kVersion;
+  gateway["protocolVersion"] = protocol::kVersion;
   gateway["buildFlavor"] = firmware::kBuildFlavor;
   gateway["buildDate"] = firmware::kBuildDate;
   gateway["gitCommit"] = firmware::kGitCommit;
@@ -207,12 +218,12 @@ void Dashboard::handleStatus() {
   pairing["pairingMode"] = radio_->pairingMode();
   pairing["candidateNodeId"] = candidate.available ? candidate.nodeId : "unavailable";
   if (candidate.available) {
-    pairing["candidateBootSessionId"] = candidate.bootSessionId;
+    pairing["candidatePersistentSessionId"] = candidate.persistentSessionId;
     pairing["candidateSequence"] = candidate.sequence;
     pairing["candidateRssiDbm"] = candidate.rssiDbm;
     pairing["candidateSnrDb"] = candidate.snrDb;
   } else {
-    pairing["candidateBootSessionId"] = nullptr;
+    pairing["candidatePersistentSessionId"] = nullptr;
     pairing["candidateSequence"] = nullptr;
     pairing["candidateRssiDbm"] = nullptr;
     pairing["candidateSnrDb"] = nullptr;
@@ -236,7 +247,7 @@ void Dashboard::handleStatus() {
   if (latest.available) {
     const protocol::TelemetryPacket& packet = latest.packet;
     telemetry["nodeId"] = packet.nodeId;
-    telemetry["bootSessionId"] = packet.bootSessionId;
+    telemetry["persistentSessionId"] = packet.persistentSessionId;
     telemetry["sequence"] = packet.sequence;
     telemetry["medianEchoUs"] = packet.medianEchoUs;
     setNullable(telemetry, "rawDistanceMm", packet.rawDistanceMm,
@@ -256,6 +267,17 @@ void Dashboard::handleStatus() {
     telemetry["filterStateCode"] = static_cast<uint8_t>(packet.filterState);
     telemetry["qualityFlags"] = packet.qualityFlags;
     telemetry["healthFlags"] = packet.healthFlags;
+    telemetry["bootReason"] = protocol::bootReasonName(packet.bootReason);
+    telemetry["rtcState"] = protocol::rtcStateName(packet.rtcState);
+    telemetry["rtcUnixTime"] = packet.rtcState == protocol::RtcState::kValid
+                                   ? packet.rtcUnixTime
+                                   : 0U;
+    telemetry["pollIntervalMinutes"] = packet.pollIntervalMinutes;
+    telemetry["scheduleState"] = protocol::scheduleStateName(packet.scheduleState);
+    telemetry["scheduledMaintenanceUnix"] = packet.scheduledMaintenanceUnix;
+    telemetry["lastCommandId"] = packet.lastCommandId;
+    telemetry["lastCommandType"] = protocol::commandTypeName(packet.lastCommandType);
+    telemetry["lastCommandResult"] = protocol::commandResultName(packet.lastCommandResult);
   } else {
     telemetry["state"] = "unavailable";
   }
@@ -272,13 +294,15 @@ void Dashboard::handleStatus() {
   radioConfig["txPowerDbm"] = radio.config.txPowerDbm;
   radioConfig["syncWord"] = radio.config.syncWord;
   radioJson["receivedPackets"] = radio.receivedPackets;
-  radioJson["validProtocolV1Packets"] = radio.processing.validProtocolPackets;
+  radioJson["validProtocolV2Packets"] = radio.processing.validProtocolPackets;
   radioJson["crcErrors"] = radio.crcErrors;
   radioJson["decodeErrors"] = radio.processing.decodeErrors;
   radioJson["unknownNodePackets"] = radio.processing.unknownNodePackets;
   radioJson["duplicates"] = radio.processing.duplicates;
   radioJson["ackSent"] = radio.processing.ackSent;
   radioJson["ackFailures"] = radio.processing.ackFailures;
+  radioJson["commandResultsConfirmed"] = radio.processing.commandResultsConfirmed;
+  radioJson["commandResultsIgnored"] = radio.processing.commandResultsIgnored;
   radioJson["lastRssiDbm"] = radio.lastRssiDbm;
   radioJson["lastSnrDb"] = radio.lastSnrDb;
   radioJson["lastFrequencyErrorHz"] = radio.lastFrequencyErrorHz;
@@ -342,6 +366,41 @@ void Dashboard::handleStatus() {
     timeJson["currentUtc"] = nullptr;
     timeJson["currentUtcUnixMs"] = nullptr;
   }
+
+  const GatewayCommand command = commands_->current();
+  JsonObject commandJson = document["command"].to<JsonObject>();
+  if (command.commandId == 0U) commandJson["commandId"] = nullptr;
+  else commandJson["commandId"] = command.commandId;
+  commandJson["type"] = protocol::commandTypeName(command.type);
+  commandJson["state"] = commandStateName(command.state);
+  if (command.pollIntervalMinutes == 0U) commandJson["pollIntervalMinutes"] = nullptr;
+  else commandJson["pollIntervalMinutes"] = command.pollIntervalMinutes;
+  if (command.scheduledMaintenanceUnix == 0U)
+    commandJson["scheduledMaintenanceUnix"] = nullptr;
+  else commandJson["scheduledMaintenanceUnix"] = command.scheduledMaintenanceUnix;
+  if (command.createdUnixMs >= 0) commandJson["createdUnixMs"] = command.createdUnixMs;
+  else commandJson["createdUnixMs"] = nullptr;
+  if (command.lastSentUnixMs >= 0) commandJson["lastSentUnixMs"] = command.lastSentUnixMs;
+  else commandJson["lastSentUnixMs"] = nullptr;
+  commandJson["sendCount"] = command.sendCount;
+  commandJson["result"] = protocol::commandResultName(command.result);
+  if (command.effectivePollIntervalMinutes == 0U)
+    commandJson["effectivePollIntervalMinutes"] = nullptr;
+  else commandJson["effectivePollIntervalMinutes"] =
+      command.effectivePollIntervalMinutes;
+  if (command.effectiveMaintenanceUnix == 0U)
+    commandJson["effectiveMaintenanceUnix"] = nullptr;
+  else commandJson["effectiveMaintenanceUnix"] = command.effectiveMaintenanceUnix;
+  commandJson["gatewayTimeTrusted"] = time.trusted;
+  uint8_t knownPollMinutes = latest.available ? latest.packet.pollIntervalMinutes : 0U;
+  if (command.state == CommandState::kConfirmed &&
+      command.type == protocol::CommandType::kSetPollIntervalMinutes &&
+      command.effectivePollIntervalMinutes != 0U &&
+      (command.result == protocol::CommandResultCode::kApplied ||
+       command.result == protocol::CommandResultCode::kAlreadyApplied)) {
+    knownPollMinutes = command.effectivePollIntervalMinutes;
+  }
+  commandJson["currentKnownPollIntervalMinutes"] = knownPollMinutes;
   char lastSyncUtc[32]{};
   if (time.lastSyncUnixMs >= 0 &&
       formatUtc(time.lastSyncUnixMs, lastSyncUtc, sizeof(lastSyncUtc))) {
@@ -536,6 +595,100 @@ void Dashboard::handleBackendTest() {
              status, error[0] == '\0' ? "authentication or compatibility failure" : error);
     sendText(503, response);
   }
+}
+
+void Dashboard::handleEnterMaintenance() {
+  if (server_.arg("confirm") != "ENTER") {
+    sendText(422, "confirmation must equal ENTER");
+    return;
+  }
+  if (!radio_->paired()) {
+    sendText(409, "no production Node is paired");
+    return;
+  }
+  const TrustedTimeSnapshot now = time_->now();
+  uint32_t commandId = 0;
+  if (!commands_->create(protocol::CommandType::kEnterMaintenanceNow, 0U, 0U,
+                         now.trusted ? now.unixMs : -1, commandId)) {
+    sendText(409, commands_->lastError());
+    return;
+  }
+  GTH_LOGI("COMMAND", "queued id=%lu type=ENTER_MAINTENANCE_NOW",
+           static_cast<unsigned long>(commandId));
+  sendText(202, "ENTER_MAINTENANCE_NOW queued for the next telemetry ACK");
+}
+
+void Dashboard::handlePollIntervalCommand() {
+  if (!radio_->paired()) {
+    sendText(409, "no production Node is paired");
+    return;
+  }
+  uint32_t minutes = 0;
+  if (!parseUnsigned(server_.arg("minutes"), minutes) ||
+      minutes < 1U || minutes > 255U) {
+    sendText(422, "poll interval must be 1-255 minutes");
+    return;
+  }
+  const TrustedTimeSnapshot now = time_->now();
+  uint32_t commandId = 0;
+  if (!commands_->create(protocol::CommandType::kSetPollIntervalMinutes,
+                         static_cast<uint8_t>(minutes), 0U,
+                         now.trusted ? now.unixMs : -1, commandId)) {
+    sendText(409, commands_->lastError());
+    return;
+  }
+  GTH_LOGI("COMMAND", "queued id=%lu type=SET_POLL_INTERVAL_MINUTES value=%lu",
+           static_cast<unsigned long>(commandId), static_cast<unsigned long>(minutes));
+  sendText(202, "poll-interval command queued for the next telemetry ACK");
+}
+
+void Dashboard::handleScheduleMaintenance() {
+  if (!radio_->paired()) {
+    sendText(409, "no production Node is paired");
+    return;
+  }
+  const TrustedTimeSnapshot now = time_->now();
+  if (!now.trusted || now.unixMs < 0) {
+    sendText(409, "Gateway NTP time is untrusted; scheduling is disabled");
+    return;
+  }
+  uint32_t target = 0;
+  if (!parseUnsigned(server_.arg("targetUnix"), target)) {
+    sendText(422, "targetUnix must be UTC Unix seconds");
+    return;
+  }
+  const uint32_t nowSeconds = static_cast<uint32_t>(now.unixMs / 1000LL);
+  constexpr uint32_t horizon = 27U * 24U * 60U * 60U;
+  if (target % 60U != 0U || target < nowSeconds + 60U ||
+      target - nowSeconds > horizon) {
+    sendText(422, "target must be minute-aligned, at least 60 seconds ahead, and within 27 days");
+    return;
+  }
+  uint32_t commandId = 0;
+  if (!commands_->create(protocol::CommandType::kScheduleMaintenanceAt,
+                         0U, target, now.unixMs, commandId)) {
+    sendText(409, commands_->lastError());
+    return;
+  }
+  GTH_LOGI("COMMAND", "queued id=%lu type=SCHEDULE_MAINTENANCE_AT utc=%lu",
+           static_cast<unsigned long>(commandId), static_cast<unsigned long>(target));
+  sendText(202, "scheduled-maintenance command queued for the next telemetry ACK");
+}
+
+void Dashboard::handleCancelCommand() {
+  if (server_.arg("confirm") != "CANCEL") {
+    sendText(422, "confirmation must equal CANCEL");
+    return;
+  }
+  uint32_t commandId = 0;
+  if (!parseUnsigned(server_.arg("commandId"), commandId) ||
+      !commands_->cancel(commandId)) {
+    sendText(409, "matching pending command was not found or could not be persisted");
+    return;
+  }
+  GTH_LOGW("COMMAND", "cancelled id=%lu",
+           static_cast<unsigned long>(commandId));
+  sendText(200, "pending command cancelled");
 }
 
 void Dashboard::handleOtaUpload() {

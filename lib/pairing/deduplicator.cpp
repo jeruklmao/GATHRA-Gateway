@@ -4,18 +4,19 @@
 
 namespace gathra::gateway {
 
-TelemetryKey makeTelemetryKey(const char* nodeId, uint32_t bootSessionId,
+TelemetryKey makeTelemetryKey(const char* nodeId, uint32_t persistentSessionId,
                               uint32_t sequence) {
   TelemetryKey key{};
   if (nodeId != nullptr) strncpy(key.nodeId, nodeId, sizeof(key.nodeId) - 1U);
-  key.bootSessionId = bootSessionId;
+  key.persistentSessionId = persistentSessionId;
   key.sequence = sequence;
   return key;
 }
 
 bool telemetryKeyEqual(const TelemetryKey& lhs, const TelemetryKey& rhs) {
   return strncmp(lhs.nodeId, rhs.nodeId, build::kNodeIdCapacity) == 0 &&
-         lhs.bootSessionId == rhs.bootSessionId && lhs.sequence == rhs.sequence;
+         lhs.persistentSessionId == rhs.persistentSessionId &&
+         lhs.sequence == rhs.sequence;
 }
 
 RecentDeduplicator::RecentDeduplicator(size_t capacity) {

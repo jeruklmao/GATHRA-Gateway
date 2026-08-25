@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "deduplicator.hpp"
+#include "command_store.hpp"
 #include "pairing_manager.hpp"
 #include "queue_record.hpp"
 
@@ -57,6 +58,9 @@ enum class PacketDisposition : uint8_t {
   kNewAcknowledged,
   kDuplicateAcknowledged,
   kAckFailed,
+  kCommandResultConfirmed,
+  kCommandResultDuplicate,
+  kCommandResultIgnored,
 };
 
 struct PacketProcessingStats {
@@ -67,6 +71,8 @@ struct PacketProcessingStats {
   uint64_t ackSent = 0;
   uint64_t ackFailures = 0;
   uint64_t durableEnqueueFailures = 0;
+  uint64_t commandResultsConfirmed = 0;
+  uint64_t commandResultsIgnored = 0;
   uint64_t lastQueueWriteUs = 0;
   uint64_t lastRxToDurableEnqueueUs = 0;
   uint64_t lastRxToAckStartUs = 0;
@@ -83,6 +89,8 @@ struct PacketProcessingResult {
   PacketDisposition disposition = PacketDisposition::kDecodeRejected;
   protocol::DecodeStatus decodeStatus = protocol::DecodeStatus::kBufferTooSmall;
   protocol::TelemetryPacket telemetry{};
+  protocol::CommandResultPacket commandResult{};
+  bool isCommandResult = false;
   AckTransmission ack{};
   bool droppedOldest = false;
 };
@@ -90,8 +98,10 @@ struct PacketProcessingResult {
 class PacketProcessor {
  public:
   PacketProcessor(PairingManager& pairing, PacketQueueSink& queue,
-                  AckSink& ack, const MonotonicClock& clock)
-      : pairing_(pairing), queue_(queue), ack_(ack), clock_(clock) {}
+                  AckSink& ack, CommandStore& commands,
+                  const MonotonicClock& clock)
+      : pairing_(pairing), queue_(queue), ack_(ack), commands_(commands),
+        clock_(clock) {}
   PacketProcessingResult process(const ReceivedFrame& frame);
   const PacketProcessingStats& stats() const { return stats_; }
   const LatestTelemetry& latest() const { return latest_; }
@@ -100,6 +110,7 @@ class PacketProcessor {
   PairingManager& pairing_;
   PacketQueueSink& queue_;
   AckSink& ack_;
+  CommandStore& commands_;
   const MonotonicClock& clock_;
   PacketProcessingStats stats_{};
   LatestTelemetry latest_{};

@@ -4,6 +4,7 @@
 
 #include "backend_worker.hpp"
 #include "config_store.hpp"
+#include "command_store.hpp"
 #include "durable_queue.hpp"
 #include "ota_manager.hpp"
 #include "radio_service.hpp"
@@ -17,7 +18,8 @@ class Dashboard {
   bool begin(ConfigStore& configStore, RadioService& radio,
              DurableQueue& queue, WifiManager& wifi,
              BackendWorker& backend, TimeManager& time,
-             OtaManager& ota, const GatewayIdentity& identity,
+             CommandStore& commands, OtaManager& ota,
+             const GatewayIdentity& identity,
              const char* resetReason);
   void loop();
 
@@ -35,6 +37,10 @@ class Dashboard {
   void handlePairManual();
   void handleUnpair();
   void handleBackendTest();
+  void handleEnterMaintenance();
+  void handlePollIntervalCommand();
+  void handleScheduleMaintenance();
+  void handleCancelCommand();
   void handleOtaUpload();
   void handleOtaComplete();
   void sendText(int status, const char* text);
@@ -48,6 +54,7 @@ class Dashboard {
   WifiManager* wifi_ = nullptr;
   BackendWorker* backend_ = nullptr;
   TimeManager* time_ = nullptr;
+  CommandStore* commands_ = nullptr;
   OtaManager* ota_ = nullptr;
   GatewayIdentity identity_{};
   char resetReason_[32]{};

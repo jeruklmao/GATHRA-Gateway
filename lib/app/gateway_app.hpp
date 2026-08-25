@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 #include "backend_worker.hpp"
+#include "command_store.hpp"
 #include "config_store.hpp"
 #include "dashboard.hpp"
 #include "durable_queue.hpp"
@@ -33,6 +34,8 @@ class GatewayApp {
   ConfigStore configStore_{};
   DurableQueue queue_{};
   PairingManager pairing_{};
+  NvsCommandBackend commandBackend_{};
+  CommandStore commands_{};
   TimeManager time_{};
   RadioService radio_{};
   WifiManager wifi_{};

@@ -1,43 +1,19 @@
-# Node Protocol v1 compatibility
+# LoRa Protocol 2 compatibility
 
-The authoritative reference is the current `GATHRA-Node` implementation,
-especially `lib/protocol/protocol.cpp`; documentation is secondary. Gateway
-tests contain the exact golden telemetry bytes produced by the Node codec and
-verify the exact ACK bytes.
+Gateway 2.0.0 accepts only magic GT, protocolVersion 2. There is no v1 decoder, legacy ACK, or dual-parser mode.
 
-## Framing
+Message types are TELEMETRY=0x01, ACK_COMMAND=0x02, COMMAND_RESULT=0x03. Every multi-byte field is big-endian and all packet lengths are exact. The canonical byte layout, sentinels, enum values, flags, and alarm scheduling constraints are documented in the matching Node docs/protocol.md.
 
-- Magic: `47 54` (`GT`)
-- Version: `01`
-- Telemetry type: `01`
-- ACK type: `02`
-- Integer byte order: big-endian/network order
-- Node ID: `[A-Za-z0-9_-]{1,24}`
-- Telemetry length: `40 + N`
-- ACK length: `13 + N`
-- SX1278 packet CRC: enabled
+## ACK behavior
 
-After the telemetry prefix, the Gateway decodes Node boot/session ID, sequence,
-median echo, raw and accepted distance, MAD, temperature, humidity, battery,
-sample counts, filter-state code, quality flags, and health flags at the exact
-Node offsets. Unknown quality/health bits are preserved.
+ACK identity repeats nodeId, persistentSessionId, and telemetry sequence. It contains gatewayUnixTime plus bit0 timeValid on every response. An untrusted clock sends timestamp zero and still ACKs.
 
-Unavailable sentinels are retained in the raw payload and rendered locally as
-unavailable:
+Command codes are NONE=0, ENTER_MAINTENANCE_NOW=1, SCHEDULE_MAINTENANCE_AT=2, SET_POLL_INTERVAL_MINUTES=3. NONE requires commandId=0. Payload lengths are 0, 4-byte UTC, and 1-byte minutes respectively.
 
-| Field | Sentinel |
-| --- | ---: |
-| raw distance | `UINT32_MAX` |
-| accepted distance | `UINT32_MAX` |
-| temperature | `INT16_MIN` |
-| humidity | `UINT16_MAX` |
+Results are APPLIED=0, ALREADY_APPLIED=1, INVALID_ARGUMENT=2, RTC_UNAVAILABLE=3, RTC_TIME_UNTRUSTED=4, SCHEDULE_UNREPRESENTABLE=5, STORAGE_ERROR=6, INTERNAL_ERROR=7.
 
-The Backend independently repeats the binary validation and normalizes those
-sentinels to SQL `NULL`.
+## Queue/backend boundary
 
-## ACK identity
+Only TELEMETRY is durably queued and uploaded. The exact v2 radio payload remains the Backend source of truth. COMMAND_RESULT stays Gateway-local in this release. Backend remote commands, command tables and scheduling APIs are intentionally absent.
 
-ACK includes the same Node ID followed by the exact Node boot/session ID and
-sequence. A retry of a known tuple is ACKed again without a second enqueue.
-Protocol v1 intentionally has no LoRa authentication or HMAC; pairing is an
-operational filter, not cryptographic identity.
+Protocol 2 uses SX1278 CRC but no HMAC/authentication.

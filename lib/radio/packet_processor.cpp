@@ -6,6 +6,36 @@ namespace gathra::gateway {
 
 PacketProcessingResult PacketProcessor::process(const ReceivedFrame& frame) {
   PacketProcessingResult result{};
+  if (frame.length >= 4U &&
+      frame.bytes[3] == static_cast<uint8_t>(protocol::MessageType::kCommandResult)) {
+    result.isCommandResult = true;
+    result.decodeStatus = protocol::decodeCommandResult(
+        frame.bytes, frame.length, result.commandResult);
+    if (result.decodeStatus != protocol::DecodeStatus::kOk) {
+      ++stats_.decodeErrors;
+      result.disposition = PacketDisposition::kDecodeRejected;
+      return result;
+    }
+    ++stats_.validProtocolPackets;
+    if (!pairing_.paired() || !latest_.available ||
+        !pairing_.matches(result.commandResult.nodeId) ||
+        latest_.packet.persistentSessionId !=
+            result.commandResult.persistentSessionId) {
+      ++stats_.commandResultsIgnored;
+      result.disposition = PacketDisposition::kCommandResultIgnored;
+      return result;
+    }
+    bool duplicate = false;
+    if (!commands_.confirm(result.commandResult, duplicate)) {
+      ++stats_.commandResultsIgnored;
+      result.disposition = PacketDisposition::kCommandResultIgnored;
+      return result;
+    }
+    ++stats_.commandResultsConfirmed;
+    result.disposition = duplicate ? PacketDisposition::kCommandResultDuplicate
+                                   : PacketDisposition::kCommandResultConfirmed;
+    return result;
+  }
   result.decodeStatus = protocol::decodeTelemetry(frame.bytes, frame.length,
                                                    result.telemetry);
   if (result.decodeStatus != protocol::DecodeStatus::kOk) {
@@ -40,7 +70,7 @@ PacketProcessingResult PacketProcessor::process(const ReceivedFrame& frame) {
   latest_.reception = frame.reception;
 
   const TelemetryKey key = makeTelemetryKey(
-      result.telemetry.nodeId, result.telemetry.bootSessionId,
+      result.telemetry.nodeId, result.telemetry.persistentSessionId,
       result.telemetry.sequence);
   const bool duplicate = queue_.containsKey(key);
   if (duplicate) {

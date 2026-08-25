@@ -9,11 +9,11 @@ namespace gathra::gateway {
 
 struct TelemetryKey {
   char nodeId[build::kNodeIdCapacity]{};
-  uint32_t bootSessionId = 0;
+  uint32_t persistentSessionId = 0;
   uint32_t sequence = 0;
 };
 
-TelemetryKey makeTelemetryKey(const char* nodeId, uint32_t bootSessionId,
+TelemetryKey makeTelemetryKey(const char* nodeId, uint32_t persistentSessionId,
                               uint32_t sequence);
 bool telemetryKeyEqual(const TelemetryKey& lhs, const TelemetryKey& rhs);
 

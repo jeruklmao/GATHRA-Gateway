@@ -13,7 +13,7 @@
 #endif
 
 namespace gathra::gateway::firmware {
-inline constexpr char kVersion[] = "1.0.0";
+inline constexpr char kVersion[] = "2.0.0";
 inline constexpr char kGitCommit[] = GATHRA_GIT_COMMIT;
 inline constexpr char kBuildFlavor[] = GATHRA_BUILD_FLAVOR;
 inline constexpr char kBuildDate[] = __DATE__ " " __TIME__;

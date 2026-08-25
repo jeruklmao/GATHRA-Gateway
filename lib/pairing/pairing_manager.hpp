@@ -10,7 +10,7 @@ namespace gathra::gateway {
 struct PairingCandidate {
   bool available = false;
   char nodeId[build::kNodeIdCapacity]{};
-  uint32_t bootSessionId = 0;
+  uint32_t persistentSessionId = 0;
   uint32_t sequence = 0;
   float rssiDbm = 0.0F;
   float snrDb = 0.0F;

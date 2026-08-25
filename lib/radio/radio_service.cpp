@@ -46,13 +46,16 @@ RadioService::RadioService()
 
 bool RadioService::begin(const RadioConfig& config, PairingManager& pairing,
                          PacketQueueSink& queue, TimeManager& time,
+                         CommandStore& commands,
                          uint32_t gatewayBootSessionId) {
   radioMutex_ = xSemaphoreCreateMutex();
   if (radioMutex_ == nullptr) return false;
   pairing_ = &pairing;
   time_ = &time;
+  commands_ = &commands;
   gatewayBootSessionId_ = gatewayBootSessionId;
-  processor_ = std::make_unique<PacketProcessor>(pairing, queue, *this, clock_);
+  processor_ = std::make_unique<PacketProcessor>(pairing, queue, *this,
+                                                 commands, clock_);
 #ifdef GATHRA_HIL_SYNTHETIC
   syntheticQueue_ = xQueueCreate(4, sizeof(uint32_t));
   if (syntheticQueue_ == nullptr) return false;
@@ -203,7 +206,20 @@ AckTransmission RadioService::transmitAck(const protocol::TelemetryPacket& packe
   AckTransmission report{};
   uint8_t bytes[build::kRadioPacketCapacity]{};
   size_t length = 0;
-  if (!protocol::encodeAck(protocol::makeAck(packet), bytes, sizeof(bytes), length)) {
+  const TrustedTimeSnapshot timestamp = time_->now();
+  const bool trusted = timestamp.trusted && timestamp.unixMs >= 0 &&
+                       timestamp.unixMs / 1000LL <= UINT32_MAX;
+  protocol::AckCommandPacket ack = protocol::makeAck(
+      packet, trusted ? static_cast<uint32_t>(timestamp.unixMs / 1000LL) : 0U,
+      trusted);
+  GatewayCommand pending{};
+  if (commands_ != nullptr && commands_->pendingForAck(pending)) {
+    ack.commandId = pending.commandId;
+    ack.commandType = pending.type;
+    ack.pollIntervalMinutes = pending.pollIntervalMinutes;
+    ack.scheduledMaintenanceUnix = pending.scheduledMaintenanceUnix;
+  }
+  if (!protocol::encodeAckCommand(ack, bytes, sizeof(bytes), length)) {
     report.receiveRestored = startReceiveUnlocked();
     return report;
   }
@@ -244,6 +260,12 @@ AckTransmission RadioService::transmitAck(const protocol::TelemetryPacket& packe
   }
   report.completedUs = clock_.nowUs();
   report.receiveRestored = startReceiveUnlocked();
+  if (report.success && report.receiveRestored && ack.commandId != 0U &&
+      commands_ != nullptr) {
+    const TrustedTimeSnapshot sentAt = time_->now();
+    (void)commands_->markSent(ack.commandId,
+                              sentAt.trusted ? sentAt.unixMs : -1);
+  }
   return report;
 }
 
@@ -358,12 +380,14 @@ void RadioService::handlePhysicalReceive() {
 #ifdef GATHRA_HIL_SYNTHETIC
 void RadioService::handleSynthetic(uint32_t sequence) {
   static const uint8_t golden[] = {
-      0x47, 0x54, 0x01, 0x01, 0x02, 0x4E, 0x31,
+      0x47, 0x54, 0x02, 0x01, 0x02, 0x4E, 0x31,
       0x01, 0x02, 0x03, 0x04, 0xA0, 0xB0, 0xC0, 0xD0,
       0x00, 0x00, 0x12, 0x34, 0x00, 0x00, 0x02, 0xE4,
       0x00, 0x00, 0x02, 0xE3, 0x00, 0x03, 0xFB, 0x2E,
       0x11, 0xD7, 0x0E, 0x74, 0x07, 0x07, 0x00, 0x00,
-      0x03, 0x02, 0x02};
+      0x03, 0x02, 0x02, 0x00, 0x00, 0x69, 0xAB, 0xCD,
+      0xEF, 0x0A, 0x01, 0x69, 0xAB, 0xF0, 0x00, 0x01,
+      0x02, 0x03, 0x05, 0x03, 0x00};
   (void)radio_.standby();
   ReceivedFrame frame{};
   memcpy(frame.bytes, golden, sizeof(golden));
@@ -409,14 +433,24 @@ void RadioService::handleFrame(const ReceivedFrame& frame, bool synthetic) {
                  : "yes");
   }
   if (result.decodeStatus == protocol::DecodeStatus::kOk) {
-    GTH_LOGI("RADIO", "%sRX node=%s boot=%lu seq=%lu rssi=%.1f snr=%.1f disposition=%s",
-             synthetic ? "synthetic " : "", result.telemetry.nodeId,
-             static_cast<unsigned long>(result.telemetry.bootSessionId),
-             static_cast<unsigned long>(result.telemetry.sequence),
-             frame.reception.rssiDbm, frame.reception.snrDb,
-             dispositionName(result.disposition));
+    if (result.isCommandResult) {
+      GTH_LOGI("COMMAND", "RX result node=%s session=%lu id=%lu type=%s result=%s disposition=%s",
+               result.commandResult.nodeId,
+               static_cast<unsigned long>(result.commandResult.persistentSessionId),
+               static_cast<unsigned long>(result.commandResult.commandId),
+               protocol::commandTypeName(result.commandResult.commandType),
+               protocol::commandResultName(result.commandResult.resultCode),
+               dispositionName(result.disposition));
+    } else {
+      GTH_LOGI("RADIO", "%sRX node=%s session=%lu seq=%lu rssi=%.1f snr=%.1f disposition=%s",
+               synthetic ? "synthetic " : "", result.telemetry.nodeId,
+               static_cast<unsigned long>(result.telemetry.persistentSessionId),
+               static_cast<unsigned long>(result.telemetry.sequence),
+               frame.reception.rssiDbm, frame.reception.snrDb,
+               dispositionName(result.disposition));
+    }
   } else {
-    GTH_LOGW("RADIO", "Protocol v1 decode rejected status=%s length=%u",
+    GTH_LOGW("RADIO", "Protocol v2 decode rejected status=%s length=%u",
              protocol::decodeStatusName(result.decodeStatus),
              static_cast<unsigned>(frame.length));
   }
@@ -453,6 +487,9 @@ const char* RadioService::dispositionName(PacketDisposition disposition) {
     case PacketDisposition::kNewAcknowledged: return "NEW_ACKNOWLEDGED";
     case PacketDisposition::kDuplicateAcknowledged: return "DUPLICATE_REACK";
     case PacketDisposition::kAckFailed: return "ACK_FAILED";
+    case PacketDisposition::kCommandResultConfirmed: return "COMMAND_CONFIRMED";
+    case PacketDisposition::kCommandResultDuplicate: return "COMMAND_RESULT_DUPLICATE";
+    case PacketDisposition::kCommandResultIgnored: return "COMMAND_RESULT_IGNORED";
   }
   return "UNKNOWN";
 }

@@ -1,46 +1,20 @@
-# Local operations dashboard
+# Gateway dashboard
 
-The self-contained dashboard is served on every active Gateway interface. It
-uses embedded HTML, CSS, and JavaScript only—no CDN or external asset.
+The dashboard shows firmware 2.0.0, radio/queue/backend state, paired Node identity, latest Protocol 2 diagnostics, RSSI/SNR/frequency error, RX-to-durable and RX-to-ACK timings, UTC/NTP trust, command state, Wi-Fi, OTA and bounded logs.
 
-## Sections
+## Node Control
 
-- **Gateway Status:** firmware/build/Git metadata, immutable MAC, editable
-  logical ID, boot identity, uptime, reset reason, heap, flash, firmware/OTA
-  space, filesystem use, and radio/Wi-Fi/Backend/time/pairing state.
-- **Wi-Fi:** configured SSID, connection, IP, RSSI, reconnect and fallback AP;
-  SSID/password replace provisioning.
-- **Node Pairing:** paired state, discovery state and candidate metadata,
-  manual pairing, cancel, confirm, and confirmed unpair.
-- **Latest Node Telemetry:** paired production Node identity, echo/distance/MAD,
-  nullable temperature/humidity/distance, battery, samples, filter state, and
-  exact quality/health flag integers.
-- **LoRa Diagnostics:** applied parameters, RadioLib state/code, RX/CRC/decode/
-  unknown/duplicate/ACK counters, RF metadata, queue-write duration, and the
-  three required RX-to-durable/ACK-path latencies.
-- **Durable Queue:** depth/capacity/utilization, oldest known age, upload,
-  retry, dedup, rejection, overflow and filesystem counters, plus worker wake.
-- **Backend:** URL, credential-presence boolean, transport policy, attempt,
-  status, success, error and backoff; token replace/clear and compatibility
-  test.
-- **NTP / Time:** explicit `SYNCED`/`UNSYNCED`, current trusted UTC and last
-  observed synchronization.
-- **Logs:** bounded RAM-only recent log ring.
-- **OTA:** inactive-slot browser `.bin` upload and reboot.
-- **Controls:** confirmed Gateway reboot.
+Only one command can be pending.
 
-Status APIs never return the Wi-Fi password or Bearer token. Logs do not print
-either value. The dashboard has no application-level authentication in v1;
-this is a known limitation, not an accidental omission.
+- Enter Maintenance Now requires an explicit confirmation dialog.
+- Set Poll Interval accepts 1–255 minutes.
+- Scheduled Maintenance accepts browser-local date/time, renders the corresponding UTC ISO value, and sends minute-aligned UTC seconds. The button is disabled when Gateway time is untrusted.
+- Cancel requires the exact pending command ID and confirmation.
 
-The five-second status refresh continues while an operator edits settings, but
-it never repopulates a form after that form receives unsaved input. This keeps
-an edited SSID from reverting when focus moves to the password field and also
-protects multi-field radio and Backend edits. A failed save leaves the entered
-values intact. A successful save clears the form's dirty state and removes
-password values from the browser DOM.
+Status includes commandId, type, payload, created time, last sent time, sendCount/retry count, NONE/PENDING/SENT/CONFIRMED/FAILED/CANCELLED state, result, effective interval/target, and the latest known Node poll interval. A successful HTTP queue action means only that the command is durably pending; CONFIRMED requires matching RF COMMAND_RESULT.
 
-The WebServer executes below the radio worker. A slow client can delay another
-dashboard request but cannot make the radio worker wait for HTTP, DNS, or HTML
-rendering. OTA flash activity is the explicit exception and is shown as
-capture-unavailable.
+## Pairing and operations
+
+Pairing discovery displays valid v2 telemetry candidates but does not enqueue or ACK them. Confirmation persists one Node ID. Manual pairing remains available. Pairing is not cryptographic authentication.
+
+Wi-Fi, Gateway ID, radio, Backend, queue flush, logs and OTA controls retain existing behavior. Node command control is entirely local-dashboard; no Backend request is involved.
