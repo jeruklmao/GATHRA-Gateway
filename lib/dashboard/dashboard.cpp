@@ -278,6 +278,13 @@ void Dashboard::handleStatus() {
     telemetry["lastCommandId"] = packet.lastCommandId;
     telemetry["lastCommandType"] = protocol::commandTypeName(packet.lastCommandType);
     telemetry["lastCommandResult"] = protocol::commandResultName(packet.lastCommandResult);
+    if (packet.referenceDistanceMm == 0U) {
+      telemetry["referenceDistanceMm"] = nullptr;
+      telemetry["calibration"] = "missing";
+    } else {
+      telemetry["referenceDistanceMm"] = packet.referenceDistanceMm;
+      telemetry["calibration"] = "configured";
+    }
   } else {
     telemetry["state"] = "unavailable";
   }
@@ -294,7 +301,7 @@ void Dashboard::handleStatus() {
   radioConfig["txPowerDbm"] = radio.config.txPowerDbm;
   radioConfig["syncWord"] = radio.config.syncWord;
   radioJson["receivedPackets"] = radio.receivedPackets;
-  radioJson["validProtocolV2Packets"] = radio.processing.validProtocolPackets;
+  radioJson["validProtocolV3Packets"] = radio.processing.validProtocolPackets;
   radioJson["crcErrors"] = radio.crcErrors;
   radioJson["decodeErrors"] = radio.processing.decodeErrors;
   radioJson["unknownNodePackets"] = radio.processing.unknownNodePackets;

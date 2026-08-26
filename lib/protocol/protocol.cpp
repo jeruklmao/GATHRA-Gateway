@@ -170,7 +170,8 @@ bool encodeTelemetry(const TelemetryPacket& p, uint8_t* output, size_t capacity,
       !w.u8(static_cast<uint8_t>(p.scheduleState)) ||
       !w.u32(p.scheduledMaintenanceUnix) || !w.u32(p.lastCommandId) ||
       !w.u8(static_cast<uint8_t>(p.lastCommandType)) ||
-      !w.u8(static_cast<uint8_t>(p.lastCommandResult))) return false;
+      !w.u8(static_cast<uint8_t>(p.lastCommandResult)) ||
+      !w.u32(p.referenceDistanceMm)) return false;
   written = w.size();
   return true;
 }
@@ -192,7 +193,8 @@ DecodeStatus decodeTelemetry(const uint8_t* input, size_t length, TelemetryPacke
       !r.u8(boot) || !r.u8(rtc) || !r.u32(p.rtcUnixTime) ||
       !r.u8(p.pollIntervalMinutes) || !r.u8(schedule) ||
       !r.u32(p.scheduledMaintenanceUnix) || !r.u32(p.lastCommandId) ||
-      !r.u8(command) || !r.u8(result)) return DecodeStatus::kBufferTooSmall;
+      !r.u8(command) || !r.u8(result) ||
+      !r.u32(p.referenceDistanceMm)) return DecodeStatus::kBufferTooSmall;
   if (filter > static_cast<uint8_t>(FilterState::kInvalid) || !validBoot(boot) ||
       !validRtc(rtc) || !validSchedule(schedule) || !validCommand(command) ||
       !validResult(result, true) || p.pollIntervalMinutes == 0U) {

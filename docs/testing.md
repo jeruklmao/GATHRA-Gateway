@@ -7,7 +7,9 @@ pio test -e native
 pio run -e esp32-c3-devkitm-1
 ~~~
 
-Native tests cover Protocol 2 TELEMETRY/ACK_COMMAND/COMMAND_RESULT golden bytes, big-endian fields, wrong versions and malformed lengths, NONE and all required commands, timeValid true/false, every result code, pairing/session deduplication, durable-before-ACK behavior, command allocator persistence, pending/restart/resend, exact result matching, wrong ID ignore, duplicate result, confirmed-not-resent, queue recovery, and existing configuration/queue logic.
+Native tests cover Protocol 3 TELEMETRY/ACK_COMMAND/COMMAND_RESULT golden bytes, appended zero/non-zero/maximum `referenceDistanceMm`, big-endian fields, Protocol 1/2 rejection and malformed lengths, NONE and all required commands, timeValid true/false, every result code, pairing/session deduplication, durable-before-ACK behavior, command allocator persistence, pending/restart/resend, exact result matching, wrong ID ignore, duplicate result, confirmed-not-resent, maximum-size queue-record recovery, exact Backend Base64 serialization, and existing configuration/queue logic.
+
+The physical evidence below is the Firmware 2.0.0 / Protocol 2 regression baseline. Firmware 2.1.0 / Protocol 3 must complete its own RF HIL before release; automated builds alone are not recorded as hardware evidence.
 
 ## USB/RF HIL evidence (2026-08-25)
 

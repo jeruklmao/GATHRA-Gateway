@@ -9,11 +9,26 @@ namespace gathra::gateway::protocol {
 
 inline constexpr uint8_t kMagic0 = 0x47;
 inline constexpr uint8_t kMagic1 = 0x54;
-inline constexpr uint8_t kVersion = 2;
+inline constexpr uint8_t kVersion = 3;
 inline constexpr uint8_t kAckTimeValid = 1U << 0;
 inline constexpr uint32_t kDistanceUnavailable = UINT32_MAX;
 inline constexpr int16_t kTemperatureUnavailable = INT16_MIN;
 inline constexpr uint16_t kHumidityUnavailable = UINT16_MAX;
+inline constexpr size_t kCommonHeaderFixedBytes = 5U;
+inline constexpr size_t kReferenceDistancePayloadOffset = 53U;
+inline constexpr size_t kReferenceDistanceBytes = 4U;
+inline constexpr size_t kTelemetryPayloadBytes =
+    kReferenceDistancePayloadOffset + kReferenceDistanceBytes;
+inline constexpr size_t kAckCommandFixedPayloadBytes = 19U;
+inline constexpr size_t kCommandResultPayloadBytes = 15U;
+inline constexpr size_t kMaximumTelemetryPacketBytes =
+    kCommonHeaderFixedBytes + (build::kNodeIdCapacity - 1U) +
+    kTelemetryPayloadBytes;
+
+static_assert(kTelemetryPayloadBytes == 57U,
+              "Protocol v3 TELEMETRY payload size must remain 57 bytes");
+static_assert(kMaximumTelemetryPacketBytes <= build::kRadioPacketCapacity,
+              "Protocol v3 TELEMETRY exceeds radio/queue capacity");
 
 enum class MessageType : uint8_t {
   kTelemetry = 0x01,
@@ -80,6 +95,7 @@ struct TelemetryPacket {
   uint32_t lastCommandId = 0;
   CommandType lastCommandType = CommandType::kNone;
   CommandResultCode lastCommandResult = CommandResultCode::kNone;
+  uint32_t referenceDistanceMm = 0;
 };
 
 struct AckCommandPacket {

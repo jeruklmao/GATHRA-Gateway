@@ -15,7 +15,7 @@ frame contains:
 
 Append writes a `.tmp`, checks the full byte count, flushes and closes it, then
 renames it to `.rec`. Startup deletes incomplete temporary files, validates
-framing/CRC/Protocol v2 for each committed file, removes corrupt records with
+framing/CRC/Protocol v3 for each committed file, removes corrupt records with
 diagnostics, sorts by record ID, and resumes at the next ID.
 
 The runtime index is deliberately compact: each queued record retains only its
@@ -58,10 +58,10 @@ The mounted filesystem's reported total, shown on the dashboard, is the
 runtime authority and may make the derived capacity lower than this partition
 calculation.
 
-When logical capacity or physical storage is full, v1 may remove exactly the
+When logical capacity or physical storage is full, the queue may remove exactly the
 oldest record and retry the newest append. The dropped-oldest counter is
 incremented and checkpointed, and an ERROR log is emitted after RX is restored.
 The newest packet is ACKed only if its own durable write succeeds. If safe
 replacement fails, it is not ACKed. Data loss is never silent.
 
-Raw history has no automatic Backend retention policy in v1.
+Raw history has no automatic Backend retention policy.

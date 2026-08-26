@@ -1,14 +1,14 @@
 # GATHRA Gateway
 
-GATHRA Gateway firmware 2.0.0 is the single-paired-Node bridge for LoRa Protocol 2. It decodes v2 TELEMETRY, durably spools the exact packet before ACK, sends ACK_COMMAND immediately with fresh UTC trust state and at most one persisted command, restores RX, and uploads telemetry asynchronously. Backend or NTP delay never blocks the ACK path.
+GATHRA Gateway firmware 2.1.0 is the single-paired-Node bridge for LoRa Protocol 3. It decodes v3 TELEMETRY, durably spools the exact packet before ACK, sends ACK_COMMAND immediately with fresh UTC trust state and at most one persisted command, restores RX, and uploads telemetry asynchronously. Backend or NTP delay never blocks the ACK path.
 
-Protocol v1 is intentionally unsupported.
+Protocols 1 and 2 are intentionally unsupported.
 
 ## Reliability pipeline
 
 ~~~text
 SX1278 DIO0
-  -> validate v2 and paired Node
+  -> validate v3 and paired Node
   -> deduplicate by nodeId + persistentSessionId + sequence
   -> atomic LittleFS enqueue
   -> build ACK_COMMAND with current timeValid/UTC and pending command
@@ -35,4 +35,4 @@ Firmware uses ESP32-C3 Super Mini hardware, SX1278 at 433 MHz, LittleFS durable 
 
 See docs/protocol-compatibility.md, docs/architecture.md, docs/dashboard.md, and docs/testing.md.
 
-Protocol 2 still has radio CRC but no HMAC/authentication. Pairing is an operational allow-list, not cryptographic identity.
+Protocol 3 still has radio CRC but no HMAC/authentication. Pairing is an operational allow-list, not cryptographic identity.

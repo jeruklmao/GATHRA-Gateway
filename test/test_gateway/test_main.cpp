@@ -22,14 +22,15 @@ using namespace gathra::gateway;
 namespace {
 
 const uint8_t kNodeGolden[] = {
-    0x47,0x54,0x02,0x01,0x02,0x4E,0x31,
+    0x47,0x54,0x03,0x01,0x02,0x4E,0x31,
     0x01,0x02,0x03,0x04,0xA0,0xB0,0xC0,0xD0,
     0x00,0x00,0x12,0x34,0x00,0x00,0x02,0xE4,
     0x00,0x00,0x02,0xE3,0x00,0x03,0xFB,0x2E,
     0x11,0xD7,0x0E,0x74,0x07,0x07,0x00,0x00,
     0x03,0x02,0x02,0x00,0x00,0x69,0xAB,0xCD,
     0xEF,0x0A,0x01,0x69,0xAB,0xF0,0x00,0x01,
-    0x02,0x03,0x05,0x03,0x00};
+    0x02,0x03,0x05,0x03,0x00,0x00,0x00,0x05,
+    0xDC};
 
 void pushU16(std::vector<uint8_t>& bytes, uint16_t value) {
   bytes.push_back(static_cast<uint8_t>(value >> 8U));
@@ -46,8 +47,9 @@ std::vector<uint8_t> packetFor(const std::string& nodeId,
                                uint32_t session = 0xF1020304U,
                                uint32_t sequence = 0xE0B0C0D0U,
                                uint8_t filter = 7U,
-                               bool sentinels = false) {
-  std::vector<uint8_t> bytes{0x47, 0x54, 0x02, 0x01,
+                               bool sentinels = false,
+                               uint32_t referenceDistanceMm = 1500U) {
+  std::vector<uint8_t> bytes{0x47, 0x54, 0x03, 0x01,
                              static_cast<uint8_t>(nodeId.size())};
   bytes.insert(bytes.end(), nodeId.begin(), nodeId.end());
   pushU32(bytes, session); pushU32(bytes, sequence); pushU32(bytes, 0x80000001U);
@@ -66,6 +68,7 @@ std::vector<uint8_t> packetFor(const std::string& nodeId,
   pushU32(bytes, 0U); pushU32(bytes, 0U);
   bytes.push_back(static_cast<uint8_t>(protocol::CommandType::kNone));
   bytes.push_back(static_cast<uint8_t>(protocol::CommandResultCode::kNone));
+  pushU32(bytes, referenceDistanceMm);
   return bytes;
 }
 
@@ -179,24 +182,47 @@ struct ProcessorFixture {
   PacketProcessor processor;
 };
 
-void test_protocol_v2_golden_and_ack_commands() {
+void test_protocol_v3_golden_and_ack_commands() {
   protocol::TelemetryPacket decoded{};
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
       static_cast<uint8_t>(protocol::decodeTelemetry(kNodeGolden, sizeof(kNodeGolden), decoded)));
   TEST_ASSERT_EQUAL_HEX32(0x01020304U, decoded.persistentSessionId);
+  TEST_ASSERT_EQUAL_UINT32(1500U, decoded.referenceDistanceMm);
+  TEST_ASSERT_EQUAL_UINT(62U + std::strlen(decoded.nodeId), sizeof(kNodeGolden));
+  TEST_ASSERT_EQUAL_UINT(53U, protocol::kReferenceDistancePayloadOffset);
+  TEST_ASSERT_EQUAL_UINT(57U, protocol::kTelemetryPayloadBytes);
   TEST_ASSERT_EQUAL_STRING("RTC_TIMER", protocol::bootReasonName(decoded.bootReason));
+
+  uint8_t bytes[64]{}; size_t written = 0;
+  protocol::AckCommandPacket none = protocol::makeAck(decoded, 1787600000U, false);
+  TEST_ASSERT_TRUE(protocol::encodeAckCommand(none, bytes, sizeof(bytes), written));
+  TEST_ASSERT_EQUAL_UINT(protocol::kCommonHeaderFixedBytes +
+                             std::strlen(none.nodeId) +
+                             protocol::kAckCommandFixedPayloadBytes,
+                         written);
+  protocol::AckCommandPacket roundtrip{};
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
+      static_cast<uint8_t>(protocol::decodeAckCommand(bytes, written, roundtrip)));
+  TEST_ASSERT_FALSE(roundtrip.timeValid);
+  TEST_ASSERT_EQUAL_UINT32(0U, roundtrip.gatewayUnixTime);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::CommandType::kNone),
+                          static_cast<uint8_t>(roundtrip.commandType));
+
   protocol::AckCommandPacket ack = protocol::makeAck(decoded, 1787600000U, true);
   ack.commandId = 7U;
   ack.commandType = protocol::CommandType::kSetPollIntervalMinutes;
   ack.pollIntervalMinutes = 5U;
-  uint8_t bytes[64]{}; size_t written = 0;
   TEST_ASSERT_TRUE(protocol::encodeAckCommand(ack, bytes, sizeof(bytes), written));
-  protocol::AckCommandPacket roundtrip{};
+  TEST_ASSERT_EQUAL_UINT8(protocol::kVersion, bytes[2]);
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
       static_cast<uint8_t>(protocol::decodeAckCommand(bytes, written, roundtrip)));
   TEST_ASSERT_TRUE(protocol::ackMatches(roundtrip, decoded));
   TEST_ASSERT_TRUE(roundtrip.timeValid);
   TEST_ASSERT_EQUAL_UINT8(5U, roundtrip.pollIntervalMinutes);
+  bytes[2] = 2U;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kUnsupportedVersion),
+      static_cast<uint8_t>(protocol::decodeAckCommand(bytes, written, roundtrip)));
+  bytes[2] = protocol::kVersion;
 
   ack.commandType = protocol::CommandType::kScheduleMaintenanceAt;
   ack.scheduledMaintenanceUnix = 1787600400U;
@@ -210,18 +236,31 @@ void test_protocol_v2_golden_and_ack_commands() {
 void test_protocol_bounds_sentinels_and_malformed() {
   for (const std::string id : {std::string("A"), std::string(24U, 'Z')}) {
     const auto bytes = packetFor(id, UINT32_MAX, 0x80000001U, 7U, true);
-    TEST_ASSERT_EQUAL_UINT(58U + id.size(), bytes.size());
+    TEST_ASSERT_EQUAL_UINT(62U + id.size(), bytes.size());
     protocol::TelemetryPacket decoded{};
     TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
         static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
     TEST_ASSERT_EQUAL_HEX32(UINT32_MAX, decoded.persistentSessionId);
     TEST_ASSERT_EQUAL_HEX32(UINT32_MAX, decoded.rawDistanceMm);
+    TEST_ASSERT_EQUAL_UINT32(1500U, decoded.referenceDistanceMm);
   }
   auto bytes = packetFor("N1");
   protocol::TelemetryPacket decoded{};
   bytes[2] = 1U;
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kUnsupportedVersion),
       static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
+  bytes.resize(bytes.size() - 4U);
+  bytes[2] = 2U;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kUnsupportedVersion),
+      static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
+  bytes = packetFor("N1", 1U, 2U, 7U, false, 0U);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
+      static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
+  TEST_ASSERT_EQUAL_UINT32(0U, decoded.referenceDistanceMm);
+  bytes = packetFor("N1", 1U, 2U, 7U, false, UINT32_MAX);
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
+      static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, decoded.referenceDistanceMm);
   bytes = packetFor("N1"); bytes.pop_back();
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kBufferTooSmall),
       static_cast<uint8_t>(protocol::decodeTelemetry(bytes.data(), bytes.size(), decoded)));
@@ -261,7 +300,18 @@ void test_command_result_codec_and_store_restart_reliability() {
   result.effectivePollIntervalMinutes = 5U;
   uint8_t bytes[64]{}; size_t written = 0;
   TEST_ASSERT_TRUE(protocol::encodeCommandResult(result, bytes, sizeof(bytes), written));
+  TEST_ASSERT_EQUAL_UINT8(protocol::kVersion, bytes[2]);
+  TEST_ASSERT_EQUAL_UINT(protocol::kCommonHeaderFixedBytes +
+                             std::strlen(result.nodeId) +
+                             protocol::kCommandResultPayloadBytes,
+                         written);
   protocol::CommandResultPacket decoded{};
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
+      static_cast<uint8_t>(protocol::decodeCommandResult(bytes, written, decoded)));
+  bytes[2] = 2U;
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kUnsupportedVersion),
+      static_cast<uint8_t>(protocol::decodeCommandResult(bytes, written, decoded)));
+  bytes[2] = protocol::kVersion;
   TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(protocol::DecodeStatus::kOk),
       static_cast<uint8_t>(protocol::decodeCommandResult(bytes, written, decoded)));
   bool duplicate = false;
@@ -342,10 +392,28 @@ void test_pairing_dedup_queue_wrap_and_corruption() {
   TEST_ASSERT_TRUE(queue.enqueue(one)); TEST_ASSERT_TRUE(queue.enqueue(two));
   TEST_ASSERT_TRUE(queue.enqueue(three));
   TEST_ASSERT_EQUAL_UINT32(1U, queue.stats().droppedOldest);
-  storage.records["ffffffffffffffff.rec"] = {0x47, 0x54, 0x02};
+  storage.records["ffffffffffffffff.rec"] = {0x47, 0x54, 0x03};
   DurableQueueCore recovered(storage, 2U);
   TEST_ASSERT_TRUE(recovered.recover());
   TEST_ASSERT_EQUAL_UINT32(1U, recovered.stats().corruptRecords);
+
+  const auto maximumPacket = packetFor(std::string(24U, 'Z'), UINT32_MAX,
+                                       UINT32_MAX, 7U, false, UINT32_MAX);
+  TEST_ASSERT_EQUAL_UINT(protocol::kMaximumTelemetryPacketBytes,
+                         maximumPacket.size());
+  QueueRecord maximumRecord = queueRecord(maximumPacket);
+  maximumRecord.recordId = 9U;
+  std::vector<uint8_t> encodedRecord;
+  TEST_ASSERT_TRUE(QueueRecordCodec::encode(maximumRecord, encodedRecord));
+  TEST_ASSERT_EQUAL_UINT(QueueRecordCodec::kFixedBytesWithoutPayload +
+                             protocol::kMaximumTelemetryPacketBytes,
+                         encodedRecord.size());
+  QueueRecord recoveredMaximum{};
+  TEST_ASSERT_TRUE(QueueRecordCodec::decode(encodedRecord.data(),
+                                             encodedRecord.size(),
+                                             recoveredMaximum));
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(maximumPacket.data(), recoveredMaximum.rawPayload,
+                                maximumPacket.size());
 }
 
 void test_configuration_and_backend_payload() {
@@ -359,7 +427,7 @@ void test_configuration_and_backend_payload() {
   GatewayIdentity identity{};
   std::strcpy(identity.gatewayId, "GTH-GW-AABBCCDDEEFF");
   std::strcpy(identity.hardwareMac, "AA:BB:CC:DD:EE:FF");
-  std::strcpy(identity.firmwareVersion, "2.0.0");
+  std::strcpy(identity.firmwareVersion, "2.1.0");
   identity.bootSessionId = 123U;
   QueueRecord record = queueRecord(std::vector<uint8_t>(std::begin(kNodeGolden),
                                                         std::end(kNodeGolden)));
@@ -368,10 +436,13 @@ void test_configuration_and_backend_payload() {
   TEST_ASSERT_TRUE(serializeBackendBatch(identity, {record}, json));
   JsonDocument parsed;
   TEST_ASSERT_FALSE(static_cast<bool>(deserializeJson(parsed, json)));
-  TEST_ASSERT_EQUAL_STRING("2.0.0",
+  TEST_ASSERT_EQUAL_STRING("2.1.0",
       parsed["gateway"]["firmwareVersion"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT16(sizeof(kNodeGolden),
       parsed["readings"][0]["packetLength"].as<uint16_t>());
+  TEST_ASSERT_EQUAL_STRING(
+      "R1QDAQJOMQECAwSgsMDQAAASNAAAAuQAAALjAAP7LhHXDnQHBwAAAwICAABpq83vCgFpq/AAAQIDBQMAAAAF3A==",
+      parsed["readings"][0]["rawPayloadBase64"].as<const char*>());
   TEST_ASSERT_FALSE(parsed["readings"][0]["gatewayTimeTrusted"].as<bool>());
 
   std::vector<BackendRecordResult> results;
@@ -385,7 +456,7 @@ void test_configuration_and_backend_payload() {
 
 int main(int, char**) {
   UNITY_BEGIN();
-  RUN_TEST(test_protocol_v2_golden_and_ack_commands);
+  RUN_TEST(test_protocol_v3_golden_and_ack_commands);
   RUN_TEST(test_protocol_bounds_sentinels_and_malformed);
   RUN_TEST(test_command_result_codec_and_store_restart_reliability);
   RUN_TEST(test_command_allocator_does_not_reuse_after_restart);

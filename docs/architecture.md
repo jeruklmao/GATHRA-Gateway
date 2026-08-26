@@ -1,10 +1,10 @@
 # Gateway architecture
 
-Firmware 2.0.0 separates the latency-critical LoRa path from network work.
+Firmware 2.1.0 separates the latency-critical LoRa path from network work.
 
 ## Radio path
 
-A priority-4 receive worker owns SX1278 receive/transmit state. For TELEMETRY it performs exact Protocol 2 decoding, pairing validation, persistent-session sequence deduplication, and atomic LittleFS enqueue before calling the ACK transmitter. ACK_COMMAND is constructed with a current trusted-time snapshot and a copy of the persisted pending command. RX is restored immediately after transmission.
+A priority-4 receive worker owns SX1278 receive/transmit state. For TELEMETRY it performs exact Protocol 3 decoding, including the appended calibration reference, pairing validation, persistent-session sequence deduplication, and atomic LittleFS enqueue before calling the ACK transmitter. ACK_COMMAND is constructed with a current trusted-time snapshot and a copy of the persisted pending command. RX is restored immediately after transmission.
 
 The Backend worker and NTP are never awaited. If time is untrusted, flags.timeValid=0 and gatewayUnixTime=0 while ACK reliability continues.
 
@@ -18,7 +18,7 @@ States are NONE, PENDING, SENT, CONFIRMED, FAILED and CANCELLED. Only matching C
 
 ## Durable telemetry
 
-Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 2 telemetry before indexing. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
+Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 3 telemetry before indexing. The 86-byte maximum v3 telemetry packet remains within the existing 96-byte payload slot. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
 
 The live telemetry view and current known poll interval only use the explicitly paired production Node.
 

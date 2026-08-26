@@ -1,6 +1,6 @@
 # Gateway dashboard
 
-The dashboard shows firmware 2.0.0, radio/queue/backend state, paired Node identity, latest Protocol 2 diagnostics, RSSI/SNR/frequency error, RX-to-durable and RX-to-ACK timings, UTC/NTP trust, command state, Wi-Fi, OTA and bounded logs.
+The dashboard shows firmware 2.1.0, radio/queue/backend state, paired Node identity, latest Protocol 3 diagnostics, RSSI/SNR/frequency error, RX-to-durable and RX-to-ACK timings, UTC/NTP trust, command state, Wi-Fi, OTA and bounded logs. Latest Node Telemetry renders a configured `referenceDistanceMm` with millimetre units; wire value zero is shown as unavailable with `calibration=missing`.
 
 ## Node Control
 
@@ -15,6 +15,6 @@ Status includes commandId, type, payload, created time, last sent time, sendCoun
 
 ## Pairing and operations
 
-Pairing discovery displays valid v2 telemetry candidates but does not enqueue or ACK them. Confirmation persists one Node ID. Manual pairing remains available. Pairing is not cryptographic authentication.
+Pairing discovery displays valid v3 telemetry candidates but does not enqueue or ACK them. Confirmation persists one Node ID. Manual pairing remains available. Pairing is not cryptographic authentication.
 
 Wi-Fi, Gateway ID, radio, Backend, queue flush, logs and OTA controls retain existing behavior. Node command control is entirely local-dashboard; no Backend request is involved.
