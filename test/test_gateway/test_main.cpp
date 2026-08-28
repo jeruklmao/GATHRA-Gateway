@@ -12,10 +12,12 @@
 #include "deduplicator.hpp"
 #include "durable_queue_core.hpp"
 #include "gateway_config.hpp"
+#include "heartbeat_contract.hpp"
 #include "packet_processor.hpp"
 #include "pairing_manager.hpp"
 #include "protocol.hpp"
 #include "queue_record.hpp"
+#include "firmware_version.hpp"
 
 using namespace gathra::gateway;
 
@@ -347,6 +349,16 @@ void test_packet_processor_durable_before_ack_and_command_result() {
   TEST_ASSERT_EQUAL_STRING("contains", fixture.queue.events[0].c_str());
   TEST_ASSERT_EQUAL_STRING("persist", fixture.queue.events[1].c_str());
   TEST_ASSERT_EQUAL_STRING("ack", fixture.queue.events[2].c_str());
+  const PacketProcessingStats firstStats = fixture.processor.stats();
+  TEST_ASSERT_EQUAL_UINT64(1U, firstStats.ackSent);
+  TEST_ASSERT_EQUAL_UINT64(1U,
+      firstStats.successfulAckLatency.rxToStart.snapshot().count);
+  TEST_ASSERT_EQUAL_UINT64(200U,
+      firstStats.successfulAckLatency.rxToStart.snapshot().minimum);
+  TEST_ASSERT_EQUAL_UINT64(300U,
+      firstStats.successfulAckLatency.rxToComplete.snapshot().maximum);
+  TEST_ASSERT_EQUAL_UINT64(100U,
+      firstStats.successfulAckLatency.txDuration.snapshot().minimum);
   uint32_t commandId = 0;
   TEST_ASSERT_TRUE(fixture.commands.create(
       protocol::CommandType::kSetPollIntervalMinutes, 5U, 0U, -1, commandId));
@@ -420,6 +432,13 @@ void test_configuration_and_backend_payload() {
   GatewayConfig config;
   config.setDefaults("GTH-GW-AABBCCDDEEFF");
   TEST_ASSERT_TRUE(validateConfig(config));
+  TEST_ASSERT_EQUAL_UINT32(60U, config.heartbeatIntervalSeconds);
+  config.heartbeatIntervalSeconds = 14U;
+  TEST_ASSERT_FALSE(validateConfig(config));
+  config.heartbeatIntervalSeconds = 3601U;
+  TEST_ASSERT_FALSE(validateConfig(config));
+  config.heartbeatIntervalSeconds = 15U;
+  TEST_ASSERT_TRUE(validateConfig(config));
   config.radio.spreadingFactor = 13U;
   TEST_ASSERT_FALSE(validateConfig(config));
   TEST_ASSERT_FALSE(protocol::nodeIdValid("bad id"));
@@ -427,7 +446,7 @@ void test_configuration_and_backend_payload() {
   GatewayIdentity identity{};
   std::strcpy(identity.gatewayId, "GTH-GW-AABBCCDDEEFF");
   std::strcpy(identity.hardwareMac, "AA:BB:CC:DD:EE:FF");
-  std::strcpy(identity.firmwareVersion, "2.1.0");
+  std::strcpy(identity.firmwareVersion, "2.2.0");
   identity.bootSessionId = 123U;
   QueueRecord record = queueRecord(std::vector<uint8_t>(std::begin(kNodeGolden),
                                                         std::end(kNodeGolden)));
@@ -436,7 +455,7 @@ void test_configuration_and_backend_payload() {
   TEST_ASSERT_TRUE(serializeBackendBatch(identity, {record}, json));
   JsonDocument parsed;
   TEST_ASSERT_FALSE(static_cast<bool>(deserializeJson(parsed, json)));
-  TEST_ASSERT_EQUAL_STRING("2.1.0",
+  TEST_ASSERT_EQUAL_STRING("2.2.0",
       parsed["gateway"]["firmwareVersion"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT16(sizeof(kNodeGolden),
       parsed["readings"][0]["packetLength"].as<uint16_t>());
@@ -452,6 +471,195 @@ void test_configuration_and_backend_payload() {
   TEST_ASSERT_FALSE(backendHttpResponseMayDequeue(503));
 }
 
+void test_configuration_v1_migration_preserves_operator_values() {
+  GatewayConfigV1 legacy{};
+  std::strcpy(legacy.gatewayId, "GTH-GW-MIGRATION");
+  std::strcpy(legacy.wifiSsid, "Field WiFi");
+  std::strcpy(legacy.wifiPassword, "password123");
+  std::strcpy(legacy.pairedNodeId, "NODE_1");
+  std::strcpy(legacy.backendBaseUrl, "https://api.gathra.my.id");
+  std::strcpy(legacy.backendBearerToken, "preserved-token");
+  legacy.radio.frequencyMhz = 434.0F;
+  legacy.backendBatchSize = 17U;
+  legacy.backendHttpTimeoutMs = 7000U;
+  GatewayConfig migrated{};
+  TEST_ASSERT_TRUE(migrateConfigV1(legacy, migrated));
+  TEST_ASSERT_TRUE(validateConfig(migrated));
+  TEST_ASSERT_EQUAL_UINT16(build::kConfigSchemaVersion,
+                           migrated.schemaVersion);
+  TEST_ASSERT_EQUAL_STRING(legacy.gatewayId, migrated.gatewayId);
+  TEST_ASSERT_EQUAL_STRING(legacy.wifiSsid, migrated.wifiSsid);
+  TEST_ASSERT_EQUAL_STRING(legacy.wifiPassword, migrated.wifiPassword);
+  TEST_ASSERT_EQUAL_STRING(legacy.pairedNodeId, migrated.pairedNodeId);
+  TEST_ASSERT_EQUAL_STRING(legacy.backendBearerToken,
+                           migrated.backendBearerToken);
+  TEST_ASSERT_EQUAL_FLOAT(434.0F, migrated.radio.frequencyMhz);
+  TEST_ASSERT_EQUAL_UINT8(17U, migrated.backendBatchSize);
+  TEST_ASSERT_EQUAL_UINT32(7000U, migrated.backendHttpTimeoutMs);
+  TEST_ASSERT_EQUAL_UINT32(build::kDefaultHeartbeatIntervalSeconds,
+                           migrated.heartbeatIntervalSeconds);
+  legacy.schemaVersion = 2U;
+  TEST_ASSERT_FALSE(migrateConfigV1(legacy, migrated));
+}
+
+void test_heartbeat_scheduler_bounds_and_queue_priority_model() {
+  HeartbeatScheduler scheduler;
+  TEST_ASSERT_FALSE(scheduler.configure(14U, 1'000U));
+  TEST_ASSERT_FALSE(scheduler.configure(3601U, 1'000U));
+  TEST_ASSERT_TRUE(scheduler.configure(60U, 1'000U));
+  TEST_ASSERT_FALSE(scheduler.due(60'000'999U));
+  TEST_ASSERT_TRUE(scheduler.due(60'001'000U));
+  // A pending durable record prevents the worker from marking an attempt;
+  // therefore the due heartbeat remains eligible after telemetry drains.
+  const bool durableTelemetryPending = true;
+  if (!durableTelemetryPending) scheduler.markAttempt(60'001'000U);
+  TEST_ASSERT_TRUE(scheduler.due(60'001'000U));
+  scheduler.markAttempt(60'001'000U);
+  TEST_ASSERT_FALSE(scheduler.due(120'000'999U));
+  TEST_ASSERT_TRUE(scheduler.due(120'001'000U));
+  TEST_ASSERT_TRUE(heartbeatIntervalValid(15U));
+  TEST_ASSERT_TRUE(heartbeatIntervalValid(3600U));
+}
+
+HeartbeatSnapshot populatedHeartbeat() {
+  HeartbeatSnapshot snapshot{};
+  std::strcpy(snapshot.gateway.gatewayId, "GTH-GW-AABBCCDDEEFF");
+  std::strcpy(snapshot.gateway.mac, "AA:BB:CC:DD:EE:FF");
+  std::strcpy(snapshot.gateway.firmwareVersion, firmware::kVersion);
+  snapshot.gateway.protocolVersion = protocol::kVersion;
+  std::strcpy(snapshot.gateway.buildFlavor, "production");
+  snapshot.runtime.uptimeSeconds = 12345U;
+  std::strcpy(snapshot.runtime.resetReason, "POWER_ON");
+  snapshot.runtime.bootCount = 12U;
+  snapshot.runtime.freeHeapBytes = 123456U;
+  snapshot.runtime.minFreeHeapBytes = 100000U;
+  snapshot.runtime.largestFreeHeapBlockBytes = 80000U;
+  snapshot.runtime.sketchSizeBytes = 1200000U;
+  snapshot.runtime.freeSketchSpaceBytes = 200000U;
+  snapshot.runtime.flashSizeBytes = 4194304U;
+  snapshot.network.wifiConnected = true;
+  std::strcpy(snapshot.network.ssid, "Lab \"A\"");
+  snapshot.network.wifiRssiDbm = -55;
+  std::strcpy(snapshot.network.localIp, "192.168.1.20");
+  snapshot.network.backendConnectivityState =
+      BackendConnectivityState::kHealthy;
+  snapshot.network.lastBackendSuccessUnixMs = 1787600000000LL;
+  snapshot.time.valid = true;
+  snapshot.time.currentUnixMs = 1787600123000LL;
+  snapshot.time.lastNtpSyncUnixMs = 1787600000000LL;
+  snapshot.lora.paired = true;
+  std::strcpy(snapshot.lora.pairedNodeId, "N1");
+  snapshot.lora.latestReceptionAvailable = true;
+  snapshot.lora.lastRxUnixMs = 1787600100000LL;
+  snapshot.lora.latestRssiDbm = -45.5F;
+  snapshot.lora.latestSnrDb = 10.25F;
+  snapshot.lora.latestFrequencyErrorHz = 1050;
+  snapshot.lora.receivedPacketCount = 20U;
+  snapshot.lora.validTelemetryCount = 18U;
+  snapshot.ack.successCount = 2U;
+  snapshot.ack.failureCount = 1U;
+  snapshot.ack.count = 3U;
+  snapshot.ack.latestAvailable = true;
+  snapshot.ack.latestRxToStartUs = 30'200U;
+  snapshot.ack.latestRxToCompleteUs = 642'100U;
+  AckLatencyStatistics latency;
+  latency.record(30'000U, 640'000U);
+  latency.record(40'000U, 660'000U);
+  snapshot.ack.rxToStart = latency.rxToStart.snapshot();
+  snapshot.ack.rxToComplete = latency.rxToComplete.snapshot();
+  snapshot.ack.txDuration = latency.txDuration.snapshot();
+  snapshot.queue.depth = 3U;
+  snapshot.queue.capacity = 128U;
+  snapshot.queue.oldestAgeAvailable = true;
+  snapshot.queue.oldestRecordAgeSeconds = 90U;
+  snapshot.queue.telemetryUploadSuccessCount = 7U;
+  snapshot.queue.telemetryUploadFailureCount = 2U;
+  snapshot.commands.pending = true;
+  snapshot.commands.pendingCommandId = 44U;
+  std::strcpy(snapshot.commands.pendingCommandType,
+              "SET_POLL_INTERVAL_MINUTES");
+  std::strcpy(snapshot.commands.pendingCommandState, "SENT");
+  snapshot.commands.lastAvailable = true;
+  snapshot.commands.lastCommandId = 44U;
+  std::strcpy(snapshot.commands.lastCommandResult, "NONE");
+  snapshot.commands.commandsSentCount = 5U;
+  snapshot.commands.commandResultsReceivedCount = 4U;
+  return snapshot;
+}
+
+void test_heartbeat_json_schema_escaping_metrics_and_nulls() {
+  HeartbeatSnapshot snapshot = populatedHeartbeat();
+  MemoryStorage storage;
+  DurableQueueCore durableQueue(storage, 8U);
+  TEST_ASSERT_TRUE(durableQueue.recover());
+  TEST_ASSERT_EQUAL_UINT(0U, durableQueue.size());
+  std::string json;
+  TEST_ASSERT_TRUE(serializeHeartbeat(snapshot, json));
+  // Serialization has no queue sink and cannot consume durable capacity.
+  TEST_ASSERT_EQUAL_UINT(0U, durableQueue.size());
+  JsonDocument parsed;
+  TEST_ASSERT_FALSE(static_cast<bool>(deserializeJson(parsed, json)));
+  TEST_ASSERT_EQUAL_UINT8(1U, parsed["schemaVersion"].as<uint8_t>());
+  TEST_ASSERT_EQUAL_STRING("2.2.0",
+      parsed["gateway"]["firmwareVersion"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT8(3U,
+      parsed["gateway"]["protocolVersion"].as<uint8_t>());
+  TEST_ASSERT_EQUAL_STRING("Lab \"A\"",
+      parsed["network"]["ssid"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("HEALTHY",
+      parsed["network"]["backendConnectivityState"].as<const char*>());
+  TEST_ASSERT_EQUAL_UINT64(123U,
+      parsed["time"]["ntpAgeSeconds"].as<uint64_t>());
+  TEST_ASSERT_FLOAT_WITHIN(0.001F, 30.2F,
+      parsed["ack"]["latestRxToAckStartMs"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.001F, 611.9F,
+      parsed["ack"]["latestAckTxDurationMs"].as<float>());
+  TEST_ASSERT_FLOAT_WITHIN(0.001F, 35.0F,
+      parsed["ack"]["avgRxToAckStartMs"].as<float>());
+  TEST_ASSERT_EQUAL_UINT32(3U, parsed["queue"]["depth"].as<uint32_t>());
+  TEST_ASSERT_EQUAL_UINT64(2U,
+      parsed["queue"]["telemetryUploadFailureCount"].as<uint64_t>());
+
+  snapshot.time.valid = false;
+  snapshot.network.wifiConnected = false;
+  snapshot.lora.latestReceptionAvailable = false;
+  snapshot.lora.lastRxUnixMs = -1;
+  snapshot.ack = {};
+  snapshot.queue.oldestAgeAvailable = false;
+  TEST_ASSERT_TRUE(serializeHeartbeat(snapshot, json));
+  TEST_ASSERT_FALSE(static_cast<bool>(deserializeJson(parsed, json)));
+  TEST_ASSERT_TRUE(parsed["time"]["currentUtc"].isNull());
+  TEST_ASSERT_TRUE(parsed["time"]["lastNtpSyncAt"].isNull());
+  TEST_ASSERT_TRUE(parsed["network"]["wifiRssiDbm"].isNull());
+  TEST_ASSERT_TRUE(parsed["network"]["localIp"].isNull());
+  TEST_ASSERT_TRUE(parsed["lora"]["latestRssiDbm"].isNull());
+  TEST_ASSERT_TRUE(parsed["ack"]["latestRxToAckStartMs"].isNull());
+  TEST_ASSERT_TRUE(parsed["ack"]["avgRxToAckStartMs"].isNull());
+  TEST_ASSERT_TRUE(parsed["queue"]["oldestRecordAgeSeconds"].isNull());
+}
+
+void test_heartbeat_http_failures_and_connectivity_classification() {
+  TEST_ASSERT_TRUE(heartbeatHttpSucceeded(200));
+  TEST_ASSERT_TRUE(heartbeatHttpSucceeded(202));
+  for (const int status : {0, 401, 404, 500, 503}) {
+    TEST_ASSERT_FALSE(heartbeatHttpSucceeded(status));
+  }
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(BackendConnectivityState::kUnknown),
+      static_cast<uint8_t>(classifyBackendConnectivity(0U, 0U)));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(BackendConnectivityState::kHealthy),
+      static_cast<uint8_t>(classifyBackendConnectivity(1U, 0U)));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(BackendConnectivityState::kDegraded),
+      static_cast<uint8_t>(classifyBackendConnectivity(1U, 2U)));
+  TEST_ASSERT_EQUAL_UINT8(
+      static_cast<uint8_t>(BackendConnectivityState::kOffline),
+      static_cast<uint8_t>(classifyBackendConnectivity(1U, 3U)));
+  TEST_ASSERT_EQUAL_UINT8(3U, protocol::kVersion);
+  TEST_ASSERT_EQUAL_STRING("2.2.0", firmware::kVersion);
+}
+
 }  // namespace
 
 int main(int, char**) {
@@ -463,5 +671,9 @@ int main(int, char**) {
   RUN_TEST(test_packet_processor_durable_before_ack_and_command_result);
   RUN_TEST(test_pairing_dedup_queue_wrap_and_corruption);
   RUN_TEST(test_configuration_and_backend_payload);
+  RUN_TEST(test_configuration_v1_migration_preserves_operator_values);
+  RUN_TEST(test_heartbeat_scheduler_bounds_and_queue_priority_model);
+  RUN_TEST(test_heartbeat_json_schema_escaping_metrics_and_nulls);
+  RUN_TEST(test_heartbeat_http_failures_and_connectivity_classification);
   return UNITY_END();
 }

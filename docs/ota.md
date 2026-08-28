@@ -14,7 +14,9 @@ curl --fail -F \
   http://192.168.4.1/api/ota
 ```
 
-The same `/api/ota` handler serves the browser and command-line workflow.
+The same `/api/ota` handler serves the browser and command-line workflow. It
+expects the PlatformIO application artifact `firmware.bin`, not a merged
+factory image, bootloader image, or partition-table image.
 During upload the dashboard and logs state that telemetry capture is not
 guaranteed.
 

@@ -1,6 +1,6 @@
 # LoRa Protocol 3 compatibility
 
-Gateway 2.1.0 accepts only magic `GT` with `protocolVersion=3`. Protocol 3 is not backward compatible with Protocol 1 or 2; there is no legacy decoder, ACK, or dual-parser mode. Every multi-byte integer is explicitly encoded big-endian and packet lengths are exact.
+Gateway 2.2.0 accepts only magic `GT` with `protocolVersion=3`. Protocol 3 is not backward compatible with Protocol 1 or 2; there is no legacy decoder, ACK, or dual-parser mode. Every multi-byte integer is explicitly encoded big-endian and packet lengths are exact.
 
 ## Common header
 

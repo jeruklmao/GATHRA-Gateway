@@ -1,6 +1,6 @@
 # Gateway architecture
 
-Firmware 2.1.0 separates the latency-critical LoRa path from network work.
+Firmware 2.2.0 separates the latency-critical LoRa path from network work.
 
 ## Radio path
 
@@ -21,6 +21,20 @@ States are NONE, PENDING, SENT, CONFIRMED, FAILED and CANCELLED. Only matching C
 Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 3 telemetry before indexing. The 86-byte maximum v3 telemetry packet remains within the existing 96-byte payload slot. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
 
 The live telemetry view and current known poll interval only use the explicitly paired production Node.
+
+## Operational heartbeat
+
+The existing low-priority Backend worker owns heartbeat scheduling and HTTP.
+It drains durable telemetry first and only starts a heartbeat while queue depth
+is zero. The worker rechecks before HTTP, caps heartbeat requests at five
+seconds, and never writes heartbeat data to LittleFS. A packet arriving during
+HTTP is still handled, persisted, and ACKed by the independent priority-4 radio
+task; its upload follows when the bounded heartbeat call returns.
+
+The heartbeat is a current in-memory snapshot. Failures are not accumulated or
+replayed and are isolated from durable-upload connectivity state. Rolling ACK
+statistics use constant memory and an incremental mean. See
+`gateway-heartbeat.md` for the schema and exact timer boundaries.
 
 ## Time
 

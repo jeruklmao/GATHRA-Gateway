@@ -17,6 +17,7 @@ PacketProcessingResult PacketProcessor::process(const ReceivedFrame& frame) {
       return result;
     }
     ++stats_.validProtocolPackets;
+    ++stats_.validCommandResultPackets;
     if (!pairing_.paired() || !latest_.available ||
         !pairing_.matches(result.commandResult.nodeId) ||
         latest_.packet.persistentSessionId !=
@@ -44,6 +45,7 @@ PacketProcessingResult PacketProcessor::process(const ReceivedFrame& frame) {
     return result;
   }
   ++stats_.validProtocolPackets;
+  ++stats_.validTelemetryPackets;
 
   if (pairing_.pairingMode()) {
     pairing_.observe(result.telemetry, frame.reception.rssiDbm,
@@ -105,8 +107,18 @@ PacketProcessingResult PacketProcessor::process(const ReceivedFrame& frame) {
   if (result.ack.attempted && result.ack.completedUs >= frame.observedUs) {
     stats_.lastRxToAckCompleteUs = result.ack.completedUs - frame.observedUs;
   }
+  if (result.ack.attempted && result.ack.completedUs >= result.ack.startUs) {
+    stats_.lastAckTxDurationUs =
+        result.ack.completedUs - result.ack.startUs;
+  }
   if (result.ack.success && result.ack.receiveRestored) {
     ++stats_.ackSent;
+    if (result.ack.startUs >= frame.observedUs &&
+        result.ack.completedUs >= frame.observedUs) {
+      stats_.successfulAckLatency.record(
+          result.ack.startUs - frame.observedUs,
+          result.ack.completedUs - frame.observedUs);
+    }
     result.disposition = duplicate ? PacketDisposition::kDuplicateAcknowledged
                                    : PacketDisposition::kNewAcknowledged;
   } else {

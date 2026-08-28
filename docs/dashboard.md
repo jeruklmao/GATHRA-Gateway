@@ -1,6 +1,15 @@
 # Gateway dashboard
 
-The dashboard shows firmware 2.1.0, radio/queue/backend state, paired Node identity, latest Protocol 3 diagnostics, RSSI/SNR/frequency error, RX-to-durable and RX-to-ACK timings, UTC/NTP trust, command state, Wi-Fi, OTA and bounded logs. Latest Node Telemetry renders a configured `referenceDistanceMm` with millimetre units; wire value zero is shown as unavailable with `calibration=missing`.
+Firmware 2.2.0 adds an **Operational Heartbeat** card. It shows the local
+interval and delivery status together with uptime/reset/boot count, heap,
+Wi-Fi, NTP, latest LoRa reception, Gateway ACK latency, and queue capacity.
+`Heartbeat interval (seconds)` accepts 15–3600 and is persisted only when the
+operator presses **Save Heartbeat Interval**. The default is 60 seconds.
+
+The card never displays the Backend bearer token or Wi-Fi password. Heartbeat
+failure does not change radio, queue, OTA, or command controls.
+
+The dashboard shows firmware 2.2.0, radio/queue/backend state, paired Node identity, latest Protocol 3 diagnostics, RSSI/SNR/frequency error, RX-to-durable and RX-to-ACK timings, UTC/NTP trust, command state, Wi-Fi, OTA and bounded logs. Latest Node Telemetry renders a configured `referenceDistanceMm` with millimetre units; wire value zero is shown as unavailable with `calibration=missing`.
 
 ## Node Control
 

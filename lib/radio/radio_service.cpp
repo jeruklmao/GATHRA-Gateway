@@ -262,6 +262,7 @@ AckTransmission RadioService::transmitAck(const protocol::TelemetryPacket& packe
   report.receiveRestored = startReceiveUnlocked();
   if (report.success && report.receiveRestored && ack.commandId != 0U &&
       commands_ != nullptr) {
+    ++diagnostics_.commandsSentCount;
     const TrustedTimeSnapshot sentAt = time_->now();
     (void)commands_->markSent(ack.commandId,
                               sentAt.trusted ? sentAt.unixMs : -1);
@@ -343,6 +344,7 @@ void RadioService::handlePhysicalReceive() {
   const size_t length = radio_.getPacketLength();
   diagnostics_.lastPacketLength = static_cast<uint16_t>(length);
   if (length == 0U || length > build::kRadioPacketCapacity) {
+    ++diagnostics_.invalidLengthPackets;
     (void)radio_.standby();
     (void)startReceiveUnlocked();
     GTH_LOGW("RADIO", "invalid received length=%u", static_cast<unsigned>(length));
@@ -356,6 +358,7 @@ void RadioService::handlePhysicalReceive() {
     return;
   }
   if (diagnostics_.lastCode != RADIOLIB_ERR_NONE) {
+    ++diagnostics_.readErrors;
     const int16_t readCode = diagnostics_.lastCode;
     (void)startReceiveUnlocked();
     GTH_LOGW("RADIO", "packet read failed code=%d", readCode);
@@ -374,6 +377,8 @@ void RadioService::handlePhysicalReceive() {
   diagnostics_.lastRssiDbm = frame.reception.rssiDbm;
   diagnostics_.lastSnrDb = frame.reception.snrDb;
   diagnostics_.lastFrequencyErrorHz = frame.reception.frequencyErrorHz;
+  diagnostics_.lastRxUptimeUs = frame.observedUs;
+  diagnostics_.lastRxUnixMs = timestamp.trusted ? timestamp.unixMs : -1;
   handleFrame(frame, false);
 }
 
@@ -412,6 +417,8 @@ void RadioService::handleSynthetic(uint32_t sequence) {
   diagnostics_.lastRssiDbm = frame.reception.rssiDbm;
   diagnostics_.lastSnrDb = frame.reception.snrDb;
   diagnostics_.lastFrequencyErrorHz = 0;
+  diagnostics_.lastRxUptimeUs = frame.observedUs;
+  diagnostics_.lastRxUnixMs = timestamp.trusted ? timestamp.unixMs : -1;
   GTH_LOGI("RADIO", "HIL canonical post-RX injection sequence=%lu",
            static_cast<unsigned long>(sequence));
   handleFrame(frame, true);

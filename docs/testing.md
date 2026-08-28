@@ -5,11 +5,23 @@
 ~~~bash
 pio test -e native
 pio run -e esp32-c3-devkitm-1
+node tools/test_dashboard_layout.mjs
 ~~~
 
 Native tests cover Protocol 3 TELEMETRY/ACK_COMMAND/COMMAND_RESULT golden bytes, appended zero/non-zero/maximum `referenceDistanceMm`, big-endian fields, Protocol 1/2 rejection and malformed lengths, NONE and all required commands, timeValid true/false, every result code, pairing/session deduplication, durable-before-ACK behavior, command allocator persistence, pending/restart/resend, exact result matching, wrong ID ignore, duplicate result, confirmed-not-resent, maximum-size queue-record recovery, exact Backend Base64 serialization, and existing configuration/queue logic.
 
-The physical evidence below is the Firmware 2.0.0 / Protocol 2 regression baseline. Firmware 2.1.0 / Protocol 3 must complete its own RF HIL before release; automated builds alone are not recorded as hardware evidence.
+Firmware 2.2.0 tests additionally cover heartbeat interval defaults/bounds and
+schema-1 config migration, the monotonic scheduler/queue-priority model, JSON
+escaping and nullable timestamps, queue/command metrics, constant-memory ACK
+statistics, HTTP 401/404/5xx/transport failure classification, the 2.2.0
+version, and unchanged Protocol 3. The headless layout check renders the exact
+embedded HTML at 1440 px desktop, 800 px tablet, and 360 px mobile widths and
+rejects page, card, form, input, or key/value overflow.
+
+The physical evidence below is historical Firmware 2.0.0 / Protocol 2
+regression evidence. No physical HIL is possible for the laptop-only 2.2.0
+heartbeat task because the deployed Gateway and Node are remote. Native tests,
+layout checks, and the production build must not be reported as OTA/RF/HIL.
 
 ## USB/RF HIL evidence (2026-08-25)
 

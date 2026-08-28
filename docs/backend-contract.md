@@ -91,3 +91,17 @@ The initial retry delay is 2 seconds, doubles to a 5-minute cap, and adds up to
 
 The Backend independently decodes the raw packet; it does not accept decoded
 sensor values from the Gateway.
+
+## Operational heartbeat
+
+Firmware 2.2.0 additionally uses the same base URL, bearer token, CA trust, and
+hostname verification for:
+
+```http
+POST /api/v1/iot/gateway/heartbeat
+```
+
+This best-effort request is never queued and any 2xx response is terminal. Its
+independent HTTP schema version is 1; LoRa remains Protocol 3. The complete
+field contract, nullable rules, timing definitions, and reset semantics are in
+`gateway-heartbeat.md`.

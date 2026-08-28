@@ -33,6 +33,16 @@ void GatewayApp::begin() {
 
   const bool configReady = configStore_.begin(derivedGatewayId_);
   if (!configReady) GTH_LOGE("APP", "NVS configuration initialization failed");
+  if (configReady) {
+    GTH_LOGI("APP", "bootCount=%lu config=%s heartbeat=%lus",
+             static_cast<unsigned long>(configStore_.bootCount()),
+             configStore_.migratedLegacyConfig() ? "migrated-v1" : "current",
+             static_cast<unsigned long>(
+                 configStore_.get().heartbeatIntervalSeconds));
+    if (!configStore_.bootCountHealthy()) {
+      GTH_LOGW("APP", "boot count could not be persisted");
+    }
+  }
   const GatewayConfig& config = configStore_.get();
   strncpy(identity_.gatewayId, config.gatewayId, sizeof(identity_.gatewayId) - 1U);
 
@@ -71,7 +81,9 @@ void GatewayApp::begin() {
   if (!radioReady) GTH_LOGE("RADIO", "radio unavailable; dashboard recovery remains active");
   const bool wifiReady = wifi_.begin(config, hardwareMacCompact_);
   if (!wifiReady) GTH_LOGE("WIFI", "Wi-Fi manager initialization failed");
-  const bool backendReady = backend_.begin(queue_, time_, config, identity_);
+  const bool backendReady = backend_.begin(
+      queue_, time_, radio_, wifi_, commands_, config, identity_,
+      configStore_.bootCount(), resetReasonName());
   if (!backendReady) GTH_LOGE("BACKEND", "backend worker initialization failed");
   const bool dashboardReady = dashboard_.begin(
       configStore_, radio_, queue_, wifi_, backend_, time_, commands_, ota_, identity_,

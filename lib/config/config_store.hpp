@@ -14,11 +14,17 @@ class ConfigStore {
   GatewayConfig& mutableConfig() { return config_; }
   void replaceInMemory(const GatewayConfig& config) { config_ = config; }
   bool healthy() const { return healthy_; }
+  uint32_t bootCount() const { return bootCount_; }
+  bool bootCountHealthy() const { return bootCountHealthy_; }
+  bool migratedLegacyConfig() const { return migratedLegacyConfig_; }
 
  private:
   Preferences preferences_;
   GatewayConfig config_{};
+  uint32_t bootCount_ = 0;
   bool healthy_ = false;
+  bool bootCountHealthy_ = false;
+  bool migratedLegacyConfig_ = false;
 };
 
 }  // namespace gathra::gateway

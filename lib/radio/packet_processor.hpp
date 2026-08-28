@@ -7,6 +7,7 @@
 #include "command_store.hpp"
 #include "pairing_manager.hpp"
 #include "queue_record.hpp"
+#include "running_statistics.hpp"
 
 namespace gathra::gateway {
 
@@ -65,6 +66,8 @@ enum class PacketDisposition : uint8_t {
 
 struct PacketProcessingStats {
   uint64_t validProtocolPackets = 0;
+  uint64_t validTelemetryPackets = 0;
+  uint64_t validCommandResultPackets = 0;
   uint64_t decodeErrors = 0;
   uint64_t unknownNodePackets = 0;
   uint64_t duplicates = 0;
@@ -77,6 +80,8 @@ struct PacketProcessingStats {
   uint64_t lastRxToDurableEnqueueUs = 0;
   uint64_t lastRxToAckStartUs = 0;
   uint64_t lastRxToAckCompleteUs = 0;
+  uint64_t lastAckTxDurationUs = 0;
+  AckLatencyStatistics successfulAckLatency{};
 };
 
 struct LatestTelemetry {

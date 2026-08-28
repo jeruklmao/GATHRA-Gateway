@@ -12,10 +12,25 @@ bool ConfigStore::begin(const char* derivedGatewayId) {
       preferences_.getBytes("config", &loaded, sizeof(loaded)) == sizeof(loaded) &&
       validateConfig(loaded)) {
     config_ = loaded;
+  } else if (storedSize == sizeof(GatewayConfigV1)) {
+    GatewayConfigV1 legacy{};
+    if (preferences_.getBytes("config", &legacy, sizeof(legacy)) !=
+            sizeof(legacy) ||
+        !migrateConfigV1(legacy, loaded) || !save(loaded)) {
+      return false;
+    }
+    migratedLegacyConfig_ = true;
   } else {
     config_.setDefaults(derivedGatewayId);
     if (!save(config_)) return false;
   }
+  const uint32_t previousBootCount = preferences_.getUInt("boot-count", 0U);
+  bootCount_ = previousBootCount == UINT32_MAX
+                   ? UINT32_MAX
+                   : previousBootCount + 1U;
+  bootCountHealthy_ = previousBootCount == UINT32_MAX ||
+                      preferences_.putUInt("boot-count", bootCount_) ==
+                          sizeof(bootCount_);
   healthy_ = true;
   return true;
 }

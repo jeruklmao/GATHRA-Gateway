@@ -1,8 +1,14 @@
 # GATHRA Gateway
 
-GATHRA Gateway firmware 2.1.0 is the single-paired-Node bridge for LoRa Protocol 3. It decodes v3 TELEMETRY, durably spools the exact packet before ACK, sends ACK_COMMAND immediately with fresh UTC trust state and at most one persisted command, restores RX, and uploads telemetry asynchronously. Backend or NTP delay never blocks the ACK path.
+GATHRA Gateway firmware 2.2.0 is the single-paired-Node bridge for LoRa Protocol 3. It decodes v3 TELEMETRY, durably spools the exact packet before ACK, sends ACK_COMMAND immediately with fresh UTC trust state and at most one persisted command, restores RX, and uploads telemetry asynchronously. Backend or NTP delay never blocks the ACK path.
 
 Protocols 1 and 2 are intentionally unsupported.
+
+Firmware 2.2.0 also sends a best-effort operational heartbeat to
+`POST /api/v1/iot/gateway/heartbeat`. It reuses the existing Backend bearer
+credential, defaults to 60 seconds (local configurable range 15–3600), never
+enters the telemetry queue, and runs only when that queue is empty. See
+`docs/gateway-heartbeat.md` for the exact schema and ACK timing semantics.
 
 ## Reliability pipeline
 
@@ -29,10 +35,12 @@ Command allocator and the single pending/confirmed record are persisted in NVS, 
 ~~~bash
 pio test -e native
 pio run -e esp32-c3-devkitm-1
+node tools/test_dashboard_layout.mjs
 ~~~
 
 Firmware uses ESP32-C3 Super Mini hardware, SX1278 at 433 MHz, LittleFS durable queue, NVS configuration/command state, Wi-Fi STA with fallback AP, browser OTA with rollback, trusted NTP, and HTTPS Backend delivery.
 
-See docs/protocol-compatibility.md, docs/architecture.md, docs/dashboard.md, and docs/testing.md.
+See docs/protocol-compatibility.md, docs/gateway-heartbeat.md,
+docs/architecture.md, docs/dashboard.md, and docs/testing.md.
 
 Protocol 3 still has radio CRC but no HMAC/authentication. Pairing is an operational allow-list, not cryptographic identity.

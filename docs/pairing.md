@@ -1,6 +1,6 @@
 # Single-Node pairing
 
-Gateway 2.1.0 stores exactly one `pairedNodeId` in NVS. It has no Node table,
+Gateway 2.2.0 stores exactly one `pairedNodeId` in NVS. It has no Node table,
 scheduler, mesh, LoRaWAN, or multi-Node fairness logic.
 
 ## Discovery pairing

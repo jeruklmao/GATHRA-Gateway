@@ -19,11 +19,16 @@ struct RadioDiagnostics {
   RadioConfig config{};
   uint64_t receivedPackets = 0;
   uint64_t crcErrors = 0;
+  uint64_t invalidLengthPackets = 0;
+  uint64_t readErrors = 0;
   PacketProcessingStats processing{};
   float lastRssiDbm = 0.0F;
   float lastSnrDb = 0.0F;
   int32_t lastFrequencyErrorHz = 0;
   uint16_t lastPacketLength = 0;
+  uint64_t lastRxUptimeUs = 0;
+  int64_t lastRxUnixMs = -1;
+  uint64_t commandsSentCount = 0;
 };
 
 class SystemMonotonicClock final : public MonotonicClock {

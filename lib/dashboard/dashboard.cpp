@@ -4,6 +4,7 @@
 
 #include <ArduinoJson.h>
 #include <Update.h>
+#include <esp_heap_caps.h>
 #include <esp_timer.h>
 #include <math.h>
 #include <memory>
@@ -124,6 +125,7 @@ void Dashboard::registerRoutes() {
   });
   server_.on("/api/gateway", HTTP_POST, [this]() { handleGateway(); });
   server_.on("/api/backend", HTTP_POST, [this]() { handleBackend(); });
+  server_.on("/api/heartbeat", HTTP_POST, [this]() { handleHeartbeat(); });
   server_.on("/api/radio", HTTP_POST, [this]() { handleRadio(); });
   server_.on("/api/radio/restart", HTTP_POST, [this]() {
     const bool restarted = radio_->restart();
@@ -169,6 +171,7 @@ void Dashboard::handleStatus() {
   const LatestTelemetry latest = radio_->latestTelemetry();
   const PairingCandidate candidate = radio_->pairingCandidate();
   const BackendStatus backend = backend_->status();
+  const HeartbeatStatus heartbeat = backend_->heartbeatStatus();
   const TimeStatus time = time_->status();
   const QueueOperationalStats queueStats = queue_->operationalStats();
   const size_t queueSize = queue_->size();
@@ -186,7 +189,11 @@ void Dashboard::handleStatus() {
   gateway["gatewayBootSessionId"] = identity_.bootSessionId;
   gateway["uptimeMs"] = static_cast<uint64_t>(esp_timer_get_time()) / 1000ULL;
   gateway["resetReason"] = resetReason_;
+  gateway["bootCount"] = configStore_->bootCount();
   gateway["freeHeapBytes"] = ESP.getFreeHeap();
+  gateway["minFreeHeapBytes"] = ESP.getMinFreeHeap();
+  gateway["largestFreeHeapBlockBytes"] =
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
   gateway["flashBytes"] = ESP.getFlashChipSize();
   gateway["firmwareBytes"] = ESP.getSketchSize();
   gateway["freeOtaSlotBytes"] = ESP.getFreeSketchSpace();
@@ -302,6 +309,7 @@ void Dashboard::handleStatus() {
   radioConfig["syncWord"] = radio.config.syncWord;
   radioJson["receivedPackets"] = radio.receivedPackets;
   radioJson["validProtocolV3Packets"] = radio.processing.validProtocolPackets;
+  radioJson["validTelemetryPackets"] = radio.processing.validTelemetryPackets;
   radioJson["crcErrors"] = radio.crcErrors;
   radioJson["decodeErrors"] = radio.processing.decodeErrors;
   radioJson["unknownNodePackets"] = radio.processing.unknownNodePackets;
@@ -319,6 +327,7 @@ void Dashboard::handleStatus() {
       radio.processing.lastRxToDurableEnqueueUs;
   radioJson["lastRxToAckStartLatencyUs"] = radio.processing.lastRxToAckStartUs;
   radioJson["lastRxToAckCompleteLatencyUs"] = radio.processing.lastRxToAckCompleteUs;
+  radioJson["lastAckTxDurationUs"] = radio.processing.lastAckTxDurationUs;
 
   JsonObject queue = document["queue"].to<JsonObject>();
   queue["queuedRecords"] = queueSize;
@@ -361,6 +370,14 @@ void Dashboard::handleStatus() {
   else backendJson["lastSuccessUnixMs"] = nullptr;
   backendJson["lastError"] = backend.lastError[0] == '\0' ? "none" : backend.lastError;
   backendJson["currentBackoffMs"] = backend.currentBackoffMs;
+  backendJson["connectivityState"] = backendConnectivityStateName(
+      classifyBackendConnectivity(backend.telemetryUploadSuccessCount,
+                                  backend.consecutiveFailures));
+  backendJson["consecutiveFailures"] = backend.consecutiveFailures;
+  backendJson["telemetryUploadSuccessCount"] =
+      backend.telemetryUploadSuccessCount;
+  backendJson["telemetryUploadFailureCount"] =
+      backend.telemetryUploadFailureCount;
 
   JsonObject timeJson = document["time"].to<JsonObject>();
   timeJson["state"] = time.trusted ? "SYNCED" : "UNSYNCED";
@@ -417,6 +434,98 @@ void Dashboard::handleStatus() {
     timeJson["lastSyncAt"] = nullptr;
     timeJson["lastSyncUnixMs"] = nullptr;
   }
+
+  const RunningStatisticsSnapshot ackStart =
+      radio.processing.successfulAckLatency.rxToStart.snapshot();
+  const RunningStatisticsSnapshot ackComplete =
+      radio.processing.successfulAckLatency.rxToComplete.snapshot();
+  JsonObject heartbeatJson = document["heartbeat"].to<JsonObject>();
+  heartbeatJson["intervalSeconds"] = config.heartbeatIntervalSeconds;
+  heartbeatJson["inProgress"] = heartbeat.inProgress;
+  if (heartbeat.lastAttemptUptimeMs > 0U) {
+    heartbeatJson["lastAttemptUptimeSeconds"] =
+        heartbeat.lastAttemptUptimeMs / 1000ULL;
+  } else {
+    heartbeatJson["lastAttemptUptimeSeconds"] = nullptr;
+  }
+  char heartbeatTimestamp[32]{};
+  if (formatUtc(heartbeat.lastAttemptUnixMs, heartbeatTimestamp,
+                sizeof(heartbeatTimestamp))) {
+    heartbeatJson["lastAttemptAt"] = heartbeatTimestamp;
+  } else {
+    heartbeatJson["lastAttemptAt"] = nullptr;
+  }
+  if (heartbeat.lastSuccessUptimeMs > 0U) {
+    heartbeatJson["lastSuccessUptimeSeconds"] =
+        heartbeat.lastSuccessUptimeMs / 1000ULL;
+  } else {
+    heartbeatJson["lastSuccessUptimeSeconds"] = nullptr;
+  }
+  if (formatUtc(heartbeat.lastSuccessUnixMs, heartbeatTimestamp,
+                sizeof(heartbeatTimestamp))) {
+    heartbeatJson["lastSuccessAt"] = heartbeatTimestamp;
+  } else {
+    heartbeatJson["lastSuccessAt"] = nullptr;
+  }
+  heartbeatJson["lastHttpStatus"] = heartbeat.lastHttpStatus;
+  heartbeatJson["lastError"] =
+      heartbeat.lastError[0] == '\0' ? "none" : heartbeat.lastError;
+  heartbeatJson["successCountSinceBoot"] = heartbeat.successCount;
+  heartbeatJson["failureCountSinceBoot"] = heartbeat.failureCount;
+  heartbeatJson["uptimeSeconds"] =
+      static_cast<uint64_t>(esp_timer_get_time()) / 1'000'000ULL;
+  heartbeatJson["resetReason"] = resetReason_;
+  heartbeatJson["bootCount"] = configStore_->bootCount();
+  heartbeatJson["freeHeapBytes"] = ESP.getFreeHeap();
+  heartbeatJson["minFreeHeapBytes"] = ESP.getMinFreeHeap();
+  heartbeatJson["largestFreeHeapBlockBytes"] =
+      heap_caps_get_largest_free_block(MALLOC_CAP_8BIT);
+  heartbeatJson["ssid"] = wifi.ssid;
+  if (wifi.connected) {
+    heartbeatJson["wifiRssiDbm"] = wifi.rssiDbm;
+    heartbeatJson["localIp"] = wifi.localIp;
+  } else {
+    heartbeatJson["wifiRssiDbm"] = nullptr;
+    heartbeatJson["localIp"] = nullptr;
+  }
+  heartbeatJson["timeState"] = time.trusted ? "SYNCED" : "UNSYNCED";
+  heartbeatJson["currentUtc"] =
+      time.trusted && currentUtc[0] != '\0' ? currentUtc : nullptr;
+  if (radio.lastRxUptimeUs > 0U) {
+    heartbeatJson["latestLoRaRssiDbm"] = radio.lastRssiDbm;
+    heartbeatJson["latestLoRaSnrDb"] = radio.lastSnrDb;
+    heartbeatJson["latestFrequencyErrorHz"] = radio.lastFrequencyErrorHz;
+  } else {
+    heartbeatJson["latestLoRaRssiDbm"] = nullptr;
+    heartbeatJson["latestLoRaSnrDb"] = nullptr;
+    heartbeatJson["latestFrequencyErrorHz"] = nullptr;
+  }
+  const bool ackAvailable = radio.processing.lastRxToAckCompleteUs > 0U;
+  if (ackAvailable) {
+    heartbeatJson["latestRxToAckStartMs"] =
+        radio.processing.lastRxToAckStartUs / 1000.0;
+    heartbeatJson["latestRxToAckCompleteMs"] =
+        radio.processing.lastRxToAckCompleteUs / 1000.0;
+    heartbeatJson["latestAckTxDurationMs"] =
+        radio.processing.lastAckTxDurationUs / 1000.0;
+  } else {
+    heartbeatJson["latestRxToAckStartMs"] = nullptr;
+    heartbeatJson["latestRxToAckCompleteMs"] = nullptr;
+    heartbeatJson["latestAckTxDurationMs"] = nullptr;
+  }
+  if (ackStart.count > 0U) {
+    heartbeatJson["avgRxToAckStartMs"] = ackStart.average / 1000.0;
+    heartbeatJson["avgRxToAckCompleteMs"] = ackComplete.average / 1000.0;
+    heartbeatJson["avgAckTxDurationMs"] =
+        radio.processing.successfulAckLatency.txDuration.snapshot().average /
+        1000.0;
+  } else {
+    heartbeatJson["avgRxToAckStartMs"] = nullptr;
+    heartbeatJson["avgRxToAckCompleteMs"] = nullptr;
+    heartbeatJson["avgAckTxDurationMs"] = nullptr;
+  }
+  heartbeatJson["queueDepth"] = queueSize;
+  heartbeatJson["queueCapacity"] = queueCapacity;
 
   JsonObject ota = document["ota"].to<JsonObject>();
   ota["uploadInProgress"] = ota_->uploadInProgress();
@@ -504,6 +613,26 @@ void Dashboard::handleBackend() {
   backend_->applyConfig(candidate, identityFor(candidate));
   backend_->flushNow();
   sendText(200, "backend configuration saved; token value remains masked");
+}
+
+void Dashboard::handleHeartbeat() {
+  GatewayConfig candidate = configStore_->get();
+  if (!parseUnsigned(server_.arg("intervalSeconds"),
+                     candidate.heartbeatIntervalSeconds)) {
+    sendText(422, "invalid heartbeat interval");
+    return;
+  }
+  const ConfigValidationResult validation = validateConfig(candidate);
+  if (!validation) {
+    sendText(422, validation.message);
+    return;
+  }
+  if (!configStore_->save(candidate)) {
+    sendText(500, "NVS heartbeat configuration write failed");
+    return;
+  }
+  backend_->applyConfig(candidate, identityFor(candidate));
+  sendText(200, "heartbeat interval saved locally");
 }
 
 void Dashboard::handleRadio() {

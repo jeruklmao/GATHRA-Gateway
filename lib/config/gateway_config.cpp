@@ -205,7 +205,38 @@ ConfigValidationResult validateConfig(const GatewayConfig& c) {
       c.wifiApGraceMs > 300'000U) {
     return fail(ConfigValidationCode::kWifiPolicy, "invalid Wi-Fi reconnect/fallback policy");
   }
+  if (c.heartbeatIntervalSeconds < build::kMinimumHeartbeatIntervalSeconds ||
+      c.heartbeatIntervalSeconds > build::kMaximumHeartbeatIntervalSeconds) {
+    return fail(ConfigValidationCode::kHeartbeatPolicy,
+                "heartbeat interval must be 15-3600 seconds");
+  }
   return {};
+}
+
+bool migrateConfigV1(const GatewayConfigV1& legacy, GatewayConfig& migrated) {
+  if (legacy.schemaVersion != 1U) return false;
+  GatewayConfig candidate{};
+  candidate.schemaVersion = build::kConfigSchemaVersion;
+  memcpy(candidate.gatewayId, legacy.gatewayId, sizeof(legacy.gatewayId));
+  memcpy(candidate.wifiSsid, legacy.wifiSsid, sizeof(legacy.wifiSsid));
+  memcpy(candidate.wifiPassword, legacy.wifiPassword, sizeof(legacy.wifiPassword));
+  memcpy(candidate.pairedNodeId, legacy.pairedNodeId, sizeof(legacy.pairedNodeId));
+  memcpy(candidate.backendBaseUrl, legacy.backendBaseUrl,
+         sizeof(legacy.backendBaseUrl));
+  memcpy(candidate.backendBearerToken, legacy.backendBearerToken,
+         sizeof(legacy.backendBearerToken));
+  candidate.radio = legacy.radio;
+  candidate.backendBatchSize = legacy.backendBatchSize;
+  candidate.backendHttpTimeoutMs = legacy.backendHttpTimeoutMs;
+  candidate.backendInitialBackoffMs = legacy.backendInitialBackoffMs;
+  candidate.backendMaximumBackoffMs = legacy.backendMaximumBackoffMs;
+  candidate.wifiReconnectIntervalMs = legacy.wifiReconnectIntervalMs;
+  candidate.wifiFallbackAfterMs = legacy.wifiFallbackAfterMs;
+  candidate.wifiApGraceMs = legacy.wifiApGraceMs;
+  candidate.heartbeatIntervalSeconds = build::kDefaultHeartbeatIntervalSeconds;
+  if (!validateConfig(candidate)) return false;
+  migrated = candidate;
+  return true;
 }
 
 }  // namespace gathra::gateway

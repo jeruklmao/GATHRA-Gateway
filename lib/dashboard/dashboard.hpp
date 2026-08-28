@@ -30,6 +30,7 @@ class Dashboard {
   void handleWifi();
   void handleGateway();
   void handleBackend();
+  void handleHeartbeat();
   void handleRadio();
   void handlePairStart();
   void handlePairConfirm();
