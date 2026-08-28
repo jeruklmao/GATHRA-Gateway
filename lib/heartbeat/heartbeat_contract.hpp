@@ -41,6 +41,9 @@ class HeartbeatScheduler {
 };
 
 struct HeartbeatSnapshot {
+  uint32_t heartbeatIntervalSeconds =
+      build::kDefaultHeartbeatIntervalSeconds;
+
   struct Gateway {
     char gatewayId[build::kGatewayIdCapacity]{};
     char mac[18]{};

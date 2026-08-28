@@ -600,6 +600,8 @@ void test_heartbeat_json_schema_escaping_metrics_and_nulls() {
   JsonDocument parsed;
   TEST_ASSERT_FALSE(static_cast<bool>(deserializeJson(parsed, json)));
   TEST_ASSERT_EQUAL_UINT8(1U, parsed["schemaVersion"].as<uint8_t>());
+  TEST_ASSERT_EQUAL_UINT32(60U,
+      parsed["heartbeatIntervalSeconds"].as<uint32_t>());
   TEST_ASSERT_EQUAL_STRING("2.2.0",
       parsed["gateway"]["firmwareVersion"].as<const char*>());
   TEST_ASSERT_EQUAL_UINT8(3U,

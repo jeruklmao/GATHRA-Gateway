@@ -46,6 +46,7 @@ Hz.
 | Path | Type | Meaning |
 |---|---|---|
 | `schemaVersion` | integer | Always `1`. |
+| `heartbeatIntervalSeconds` | integer | Current locally configured heartbeat interval, 15–3600 seconds. Read-only to Backend. |
 | `gateway.gatewayId` | string | Persisted logical Gateway ID. |
 | `gateway.mac` | string | Authoritative Wi-Fi station MAC. |
 | `gateway.firmwareVersion` | string | `2.2.0`. |

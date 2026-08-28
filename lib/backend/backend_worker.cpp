@@ -348,6 +348,7 @@ bool BackendWorker::captureHeartbeatSnapshot(const RuntimeConfig& config,
   copyText(snapshot.gateway.firmwareVersion, firmware::kVersion);
   snapshot.gateway.protocolVersion = protocol::kVersion;
   copyText(snapshot.gateway.buildFlavor, firmware::kBuildFlavor);
+  snapshot.heartbeatIntervalSeconds = config.heartbeatIntervalSeconds;
 
   snapshot.runtime.uptimeSeconds = uptimeMs() / 1000ULL;
   copyText(snapshot.runtime.resetReason, resetReason_);

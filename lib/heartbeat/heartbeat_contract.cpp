@@ -100,6 +100,7 @@ void HeartbeatScheduler::markAttempt(uint64_t nowUs) {
 bool serializeHeartbeat(const HeartbeatSnapshot& s, std::string& json) {
   JsonDocument document;
   document["schemaVersion"] = kHeartbeatSchemaVersion;
+  document["heartbeatIntervalSeconds"] = s.heartbeatIntervalSeconds;
 
   JsonObject gateway = document["gateway"].to<JsonObject>();
   gateway["gatewayId"] = s.gateway.gatewayId;
