@@ -1,54 +1,50 @@
 # Gateway testing
 
-## Automated
+## Automated checks
 
-~~~bash
+```bash
 pio test -e native
 pio run -e esp32-c3-devkitm-1
 node tools/test_dashboard_layout.mjs
-~~~
+```
 
-Native tests cover Protocol 3 TELEMETRY/ACK_COMMAND/COMMAND_RESULT golden bytes, appended zero/non-zero/maximum `referenceDistanceMm`, big-endian fields, Protocol 1/2 rejection and malformed lengths, NONE and all required commands, timeValid true/false, every result code, pairing/session deduplication, durable-before-ACK behavior, command allocator persistence, pending/restart/resend, exact result matching, wrong ID ignore, duplicate result, confirmed-not-resent, maximum-size queue-record recovery, exact Backend Base64 serialization, and existing configuration/queue logic.
+Native tests cover Protocol 3 golden packets and validation, pairing and
+session deduplication, durable-before-ACK ordering, queue recovery, Backend
+Base64 serialization, command persistence and result matching, heartbeat
+interval and schema validation, scheduler/queue priority, nullable metrics,
+connectivity classification, and firmware/configuration values.
 
-Firmware 2.2.0 tests additionally cover heartbeat interval defaults/bounds and
-schema-1 config migration, the monotonic scheduler/queue-priority model, JSON
-escaping and nullable timestamps, queue/command metrics, constant-memory ACK
-statistics, HTTP 401/404/5xx/transport failure classification, the 2.2.0
-version, and unchanged Protocol 3. The headless layout check renders the exact
-embedded HTML at 1440 px desktop, 800 px tablet, and 360 px mobile widths and
-rejects page, card, form, input, or key/value overflow.
+The production command compiles firmware for the ESP32-C3 target. The dashboard
+layout check renders the embedded HTML at 1440, 800, and 360 pixels and rejects
+page, card, form, input, and key/value overflow.
 
-The physical evidence below is historical Firmware 2.0.0 / Protocol 2
-regression evidence. No physical HIL is possible for the laptop-only 2.2.0
-heartbeat task because the deployed Gateway and Node are remote. Native tests,
-layout checks, and the production build must not be reported as OTA/RF/HIL.
+An additional live-browser form check is available when Chrome or Chromium can
+reach a running Gateway dashboard:
 
-## USB/RF HIL evidence (2026-08-25)
+```bash
+node tools/test_dashboard_forms.mjs http://gathra-gateway.local/
+```
 
-Gateway USB identity was positively mapped to MAC 10:00:3B:D4:E9:58. Firmware 2.0.0 initialized SX1278, recovered LittleFS and NVS command state, joined configured Wi-Fi at 192.168.100.34, and synchronized NTP.
+Set `GATHRA_CHROME` when the browser executable is not in a supported default
+location. This check exercises unsaved-form preservation against the running
+dashboard and does not flash firmware.
 
-A Node v2 pairing candidate was observed at RSSI -45 dBm, SNR 10.5 dB and frequency error about +1274 Hz. After pairing, real packets were durably enqueued before ACK. Representative timing was queue write 14.273 ms, RX-to-durable 15.900 ms, RX-to-ACK-start 16.089 ms, and RX-to-ACK-complete 626.828 ms; later flash writes produced bounded ACK starts up to 74.735 ms. Node ACK reception was first-attempt success.
+## RF and durable-delivery validation
 
-SET_POLL_INTERVAL_MINUTES=5 returned APPLIED and CONFIRMED. A SCHEDULE_MAINTENANCE_AT command remained PENDING through a Gateway software reboot, was restored with nextCommandId=3, resent, and confirmed. ENTER_MAINTENANCE_NOW also confirmed. The Node reported Gateway UTC and corrected an INVALID_VL RTC.
+Hardware validation must use positively identified devices and verify:
 
-For an intentional result-loss test, command 5 set the interval to 2 minutes.
-The Gateway was moved to 450 MHz only during COMMAND_RESULT reception, so its
-state remained SENT after Node persistence/application. On the next telemetry
-the same ID was resent (`sendCount=2`); the Node did not repeat the side effect,
-re-sent its stored APPLIED result, and Gateway changed to CONFIRMED. Command 10
-later restored the production interval to 10 minutes.
+1. valid Protocol 3 telemetry from the paired Node is committed before ACK;
+2. a repeated Node/session/sequence tuple is re-ACKed without another queue
+   record;
+3. an unpaired or malformed packet is neither queued nor ACKed;
+4. RX resumes after ACK transmission and after a bounded failure;
+5. a recovered LittleFS record uploads with its capture-time boot identity;
+6. `INSERTED`, `DUPLICATE`, and `REJECTED_INVALID` are handled per index;
+7. transport/authentication/server failures retain queued records;
+8. a matching command result confirms persistent command state without an RF
+   ACK;
+9. heartbeat activity never blocks radio capture and never enters the queue.
 
-Battery-only RF testing observed repeated `RTC_TIMER` hard-power boots, manual
-and command maintenance, two normal TF polls while an alarm remained pending,
-the exact minute-aligned AF wake, one-shot completion, and two successful Node
-OTA latch-preserving reboots. Representative battery-run RF was RSSI -39 to
--42 dBm, SNR 13.2 to 14.25 dB, frequency error about +1.2 kHz, with ACK start
-19.383 to 76.279 ms and ACK completion 629.949 to 687.058 ms after RX.
-
-Browser OTA uploaded 1233024 bytes, booted ota_1 PENDING_VERIFY, restored pairing/command state, and marked the image valid after checks.
-
-The currently deployed Backend still returned a v1-only permanent rejection during this bench run. The repository's minimal v2 decoder/migration tests pass, but deployment is a separate operational action.
-
-## Network safety
-
-The test laptop mapping was RTL8188 wlp0s20f0u1 for Internet and Intel AX211 wlp0s20f3 for local GATHRA AP access. Only AX211 was connected to the Node AP; the RTL connection and default Internet route were not modified. Remove the temporary AX211 NetworkManager profile after battery HIL.
+Build success is not evidence of RF reception, Node ACK reception, hardware
+power behavior, OTA rollback, or field radio range. Record those results only
+when directly observed.

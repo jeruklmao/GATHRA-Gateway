@@ -28,7 +28,7 @@ Authorization: Bearer <gateway-token>
   "gateway": {
     "gatewayId": "GTH-GW-AABBCCDDEEFF",
     "hardwareMac": "AA:BB:CC:DD:EE:FF",
-    "firmwareVersion": "1.0.0",
+    "firmwareVersion": "2.2.0",
     "bootSessionId": 1234567890
   },
   "readings": [
@@ -40,8 +40,8 @@ Authorization: Bearer <gateway-token>
       "rssiDbm": -91.5,
       "snrDb": 8.25,
       "frequencyErrorHz": -731,
-      "packetLength": 42,
-      "rawPayloadBase64": "R1QBAQJOMQECAwSgsMDQAAASNAAAAuQAAALjAAP7LhHXDnQHBwAAAwIC"
+      "packetLength": 64,
+      "rawPayloadBase64": "R1QDAQJOMQECAwSgsMDQAAASNAAAAuQAAALjAAP7LhHXDnQHBwAAAwICAABpq83vCgFpq/AAAQIDBQMAAAAF3A=="
     }
   ]
 }
@@ -49,8 +49,8 @@ Authorization: Bearer <gateway-token>
 
 `gateway.bootSessionId` describes the uploader's current process.
 `readings[].gatewayBootSessionId` is the capture-time identity and is persisted
-per reading. This deliberate refinement preserves the truth when a rebooted
-Gateway uploads records recovered from an older boot.
+per reading, including when a rebooted Gateway uploads records captured during
+a different boot.
 
 When UTC was not trusted at capture, the pair must be exactly:
 
@@ -94,7 +94,7 @@ sensor values from the Gateway.
 
 ## Operational heartbeat
 
-Firmware 2.2.0 additionally uses the same base URL, bearer token, CA trust, and
+Firmware 2.2.0 uses the same base URL, bearer token, CA trust, and
 hostname verification for:
 
 ```http

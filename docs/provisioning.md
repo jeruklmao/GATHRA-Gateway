@@ -6,12 +6,12 @@ If there is no configured SSID, the Gateway immediately starts:
 
 ```text
 SSID:     GATHRA-GW-<last 6 MAC hex digits>
-Password: sman35jakarta
+Credential: firmware-defined WPA2 credential
 URL:      http://192.168.4.1/
 ```
 
-The AP uses WPA2 through the ESP32 Wi-Fi stack. There is deliberately no
-additional dashboard login in v1, so anyone on the AP or reachable LAN can
+The AP uses WPA2 through the ESP32 Wi-Fi stack. There is no
+additional dashboard login, so anyone on the AP or reachable LAN can
 view diagnostics and change configuration. Treat network reachability as a
 security boundary.
 
@@ -40,9 +40,7 @@ Bearer token once; status reports only whether one exists. Blank retains and
 the explicit checkbox clears it. Tokens are never logged or returned.
 
 HTTPS uploads require trusted SNTP time and validate the server hostname and
-certificate chain using the embedded GTS Root R4. Local HIL may deliberately
-use `http://<reachable-host-ip>:3000`; dashboard diagnostics label it
-`LOCAL_HTTP` rather than validated HTTPS. For an isolated test, a Backend on a
-host associated with the fallback AP is reachable at that host's AP-side IP
-(normally `http://192.168.4.2:3000`) even when Gateway STA is not connected;
-production HTTPS uploads remain STA-only.
+certificate chain using the embedded GTS Root R4. An isolated HIL setup may use
+`http://<reachable-test-host>:3000`; dashboard diagnostics label it
+`LOCAL_HTTP` rather than validated HTTPS. Production delivery uses HTTPS over
+the STA connection.

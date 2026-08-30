@@ -6,9 +6,9 @@ scheduler, mesh, LoRaWAN, or multi-Node fairness logic.
 ## Discovery pairing
 
 1. In `UNPAIRED`, select **Start Pairing**.
-2. Valid Protocol v3 telemetry is displayed as a candidate with Node ID,
+2. Valid Protocol 3 telemetry is displayed as a candidate with Node ID,
    boot/session ID, sequence, RSSI, and SNR.
-3. Candidate traffic is observation-only: it is not added to the production
+3. Candidate traffic is observation-only: it is not added to the telemetry
    queue and is not ACKed.
 4. Select **Confirm Pairing**. NVS persistence must succeed.
 5. Production capture begins with the next matching packet.
@@ -24,4 +24,4 @@ is queued and ACKed; other valid packets increment unknown-Node diagnostics
 and are ignored.
 
 Pairing is not radio authentication. A transmitter that knows the paired ID can
-forge Protocol v3 packets; this remains a documented authentication limitation.
+forge Protocol 3 packets. Pairing is therefore not an authentication boundary.

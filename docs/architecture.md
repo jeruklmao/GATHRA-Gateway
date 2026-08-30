@@ -18,7 +18,7 @@ States are NONE, PENDING, SENT, CONFIRMED, FAILED and CANCELLED. Only matching C
 
 ## Durable telemetry
 
-Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 3 telemetry before indexing. The 86-byte maximum v3 telemetry packet remains within the existing 96-byte payload slot. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
+Queue files are checksummed, atomically renamed records containing exact raw RF bytes and reception metadata. Recovery validates record framing and Protocol 3 telemetry before indexing. The 86-byte maximum Protocol 3 telemetry packet fits the 96-byte payload slot. Queue capacity is bounded; a storage failure withholds ACK so receipt is never falsely claimed. Backend upload is asynchronous HTTPS.
 
 The live telemetry view and current known poll interval only use the explicitly paired production Node.
 

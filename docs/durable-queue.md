@@ -15,7 +15,7 @@ frame contains:
 
 Append writes a `.tmp`, checks the full byte count, flushes and closes it, then
 renames it to `.rec`. Startup deletes incomplete temporary files, validates
-framing/CRC/Protocol v3 for each committed file, removes corrupt records with
+framing, CRC, and Protocol 3 for each committed file, removes corrupt records with
 diagnostics, sorts by record ID, and resumes at the next ID.
 
 The runtime index is deliberately compact: each queued record retains only its

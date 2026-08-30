@@ -1,6 +1,6 @@
 # Hardware
 
-Gateway v1 contains only an ESP32-C3 Super Mini and SX1278 RA-02. It requires
+GATHRA Gateway hardware contains an ESP32-C3 Super Mini and SX1278 RA-02. It requires
 continuous external power and has no sensors, battery measurement, button, or
 deep-sleep lifecycle.
 

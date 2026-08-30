@@ -1,6 +1,6 @@
 # Gateway dashboard
 
-Firmware 2.2.0 adds an **Operational Heartbeat** card. It shows the local
+Firmware 2.2.0 provides an **Operational Heartbeat** card. It shows the local
 interval and delivery status together with uptime/reset/boot count, heap,
 Wi-Fi, NTP, latest LoRa reception, Gateway ACK latency, and queue capacity.
 `Heartbeat interval (seconds)` accepts 15–3600 and is persisted only when the
@@ -26,4 +26,6 @@ Status includes commandId, type, payload, created time, last sent time, sendCoun
 
 Pairing discovery displays valid v3 telemetry candidates but does not enqueue or ACK them. Confirmation persists one Node ID. Manual pairing remains available. Pairing is not cryptographic authentication.
 
-Wi-Fi, Gateway ID, radio, Backend, queue flush, logs and OTA controls retain existing behavior. Node command control is entirely local-dashboard; no Backend request is involved.
+The dashboard also controls Wi-Fi, Gateway ID, radio, Backend configuration,
+queue flush, logs, and OTA. Node command control is entirely local-dashboard;
+no Backend request is involved.

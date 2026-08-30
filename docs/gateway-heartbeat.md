@@ -16,8 +16,7 @@ The HTTP contract has `schemaVersion: 1`. It is independent from LoRa Protocol
 
 - Default interval: 60 seconds; local configurable range: 15–3600 seconds.
 - The interval is persisted in Gateway NVS only after an explicit dashboard
-  save. Schema-1 (firmware 2.1.0) config blobs migrate in place and retain
-  identity, Wi-Fi, Backend token, radio, pairing, and upload settings.
+  save. Other Gateway configuration is unchanged by an interval update.
 - The low-priority Backend task attempts a heartbeat only when the durable
   telemetry queue is empty. It checks the queue again immediately before HTTP.
   Telemetry that arrives during the bounded request is still durably enqueued
@@ -138,9 +137,9 @@ successful transmissions only and retain no sample list.
 
 ## Persistence and reset scope
 
-`heartbeatIntervalSeconds`, the existing Gateway config, current command, and
+`heartbeatIntervalSeconds`, Gateway configuration, current command, and
 `bootCount` survive reboot. Boot count performs one NVS write per boot and
 saturates at uint32 maximum. Uptime, heartbeat attempt counters, radio/ACK
 counters, upload counters, and rolling statistics reset at boot. Existing
 durable telemetry records and their independent lifetime queue diagnostics
-remain persistent as before.
+remain persistent.
